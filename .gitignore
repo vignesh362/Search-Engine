@@ -1,0 +1,13 @@
+# Temporary postings files
+tmp_postings/
+postings_*.tmp
+
+# Collection data file
+collection.tsv
+
+# Compiled binaries
+Parse
+InspectPostings
+
+# Other temporary files
+*.tmp
