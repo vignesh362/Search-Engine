@@ -164,9 +164,24 @@ int main(int argc, char** argv) {
             if (!token.empty()) ++term_freq[token];
         }
 
-        uint64_t docID = processed_docs + 1; // deterministic sequential IDs
-        // record docID mapping
-        if (external_id.empty()) external_id = std::to_string(docID);
+        // Use external_id as docID, convert to uint64_t
+        uint64_t docID;
+        if (external_id.empty()) {
+            // If no external_id, use sequential number as fallback
+            docID = processed_docs + 1;
+            external_id = std::to_string(docID);
+        } else {
+            // Convert external_id string to uint64_t
+            try {
+                docID = std::stoull(external_id);
+            } catch (const std::exception&) {
+                // If conversion fails, use sequential number as fallback
+                docID = processed_docs + 1;
+                std::cerr << "Warning: Could not convert external_id '" << external_id 
+                         << "' to number, using fallback docID " << docID << std::endl;
+            }
+        }
+        // record docID mapping (now docID == external_id)
         docmap_out << docID << '\t' << external_id << '\n';
 
         // stage postings
