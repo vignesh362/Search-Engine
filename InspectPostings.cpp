@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
         }
 
         std::string term(term_len, '\0');
-        if (!in.read(term.data(), static_cast<std::streamsize>(term_len))) break;
+        if (!in.read(const_cast<char*>(term.data()), static_cast<std::streamsize>(term_len))) break;
 
         uint64_t docID = 0;
         uint32_t freq = 0;

@@ -76,19 +76,18 @@ static void flush_buffer_to_temp(const std::vector<Posting>& buffer,
     RunHeader h{0x504F5354u, 1u, static_cast<uint16_t>(is_little_endian() ? 1 : 0)};
     out.write(reinterpret_cast<const char*>(&h), sizeof(h));
 
+    // Record count (written after header)
+    uint64_t records_written = buffer.size();
+    out.write(reinterpret_cast<const char*>(&records_written), sizeof(records_written));
+
     // Records
-    uint64_t records_written = 0;
     for (const Posting& p : buffer) {
         uint32_t term_len = static_cast<uint32_t>(p.term.size());
         out.write(reinterpret_cast<const char*>(&term_len), sizeof(term_len));
         out.write(p.term.data(), static_cast<std::streamsize>(p.term.size()));
         out.write(reinterpret_cast<const char*>(&p.docID), sizeof(p.docID));
         out.write(reinterpret_cast<const char*>(&p.freq), sizeof(p.freq));
-        ++records_written;
     }
-
-    // Footer (record count)
-    out.write(reinterpret_cast<const char*>(&records_written), sizeof(records_written));
     out.close();
 
     std::cout << "Wrote run #" << file_index

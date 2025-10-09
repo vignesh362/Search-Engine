@@ -9,6 +9,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <memory>
 
 namespace fs = std::filesystem;
 
@@ -41,7 +42,9 @@ struct Rec {
 
 struct RunReader {
     std::ifstream in;
-    // If you added a header/footer earlier, validate here. This version assumes raw records.
+    uint64_t records_remaining = 0;
+    bool header_read = false;
+    
     explicit RunReader(const fs::path& p) : in(p, std::ios::binary) {
         if (!in) throw std::runtime_error("Failed to open run: " + p.string());
         // Optional: set a big read buffer
@@ -50,14 +53,41 @@ struct RunReader {
         in.rdbuf()->pubsetbuf(buf, BUF);
     }
     bool next(Rec& out) {
+        // Read header if not done yet
+        if (!header_read) {
+            uint32_t magic;
+            uint16_t ver, le;
+            if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
+            if (!in.read(reinterpret_cast<char*>(&ver), sizeof(ver))) return false;
+            if (!in.read(reinterpret_cast<char*>(&le), sizeof(le))) return false;
+            
+            // Validate magic number (0x504F5354 = 'POST')
+            if (magic != 0x504F5354u) {
+                throw std::runtime_error("Invalid magic number in posting file");
+            }
+            
+            // Read record count (written after header)
+            if (!in.read(reinterpret_cast<char*>(&records_remaining), sizeof(records_remaining))) return false;
+            header_read = true;
+        }
+        
+        // Try to read record
         uint32_t term_len = 0;
-        if (!in.read(reinterpret_cast<char*>(&term_len), sizeof(term_len))) return false;
+        if (!in.read(reinterpret_cast<char*>(&term_len), sizeof(term_len))) {
+            // End of data section, try to read footer
+            if (!in.read(reinterpret_cast<char*>(&records_remaining), sizeof(records_remaining))) {
+                return false; // End of file
+            }
+            return false; // No more records
+        }
+        
         std::string term(term_len, '\0');
-        if (!in.read(term.data(), static_cast<std::streamsize>(term_len))) return false;
+        if (!in.read(const_cast<char*>(term.data()), static_cast<std::streamsize>(term_len))) return false;
         uint64_t did = 0;
         uint32_t fr = 0;
         if (!in.read(reinterpret_cast<char*>(&did), sizeof(did))) return false;
         if (!in.read(reinterpret_cast<char*>(&fr), sizeof(fr))) return false;
+        
         out.term = std::move(term);
         out.docID = did;
         out.freq  = fr;

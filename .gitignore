@@ -2,13 +2,20 @@
 tmp_postings/
 postings_*.tmp
 
+# Index output files
+index_output/
+
 # Collection data file
 collection.tsv
 
 # Compiled binaries
 Parse
 InspectPostings
+BuildIndex
 
 # Other temporary files
 *.tmp
+
+
+
 
