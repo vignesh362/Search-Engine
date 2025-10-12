@@ -104,12 +104,12 @@ static inline size_t approx_posting_bytes(const Posting& p) {
 // Defaults:
 //   temp_dir = tmp_postings
 //   flush_mb = 128
-//   max_docs = 100
+//   max_docs = UINT64_MAX (process entire collection)
 int main(int argc, char** argv) {
     fs::path input_file = argc > 1 ? fs::path(argv[1]) : fs::path("collection.tsv");
     fs::path temp_dir   = argc > 2 ? fs::path(argv[2]) : fs::path("tmp_postings");
     size_t flush_mb     = argc > 3 ? static_cast<size_t>(std::stoull(argv[3])) : static_cast<size_t>(128);
-    uint64_t max_docs   = argc > 4 ? static_cast<uint64_t>(std::stoull(argv[4])) : static_cast<uint64_t>(100);
+    uint64_t max_docs   = argc > 4 ? static_cast<uint64_t>(std::stoull(argv[4])) : UINT64_MAX;
 
     if (!fs::exists(input_file)) {
         std::cerr << "Input file does not exist: " << input_file << "\n";
