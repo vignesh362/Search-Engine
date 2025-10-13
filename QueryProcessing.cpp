@@ -425,9 +425,222 @@ static QueryEnv setup(const vector<string>& terms) {
     return env;
 }
 
-// simple BM25 disjunctive (OR) over single term
+// Multi-term query processing with DAAT traversal
+struct TermIterator {
+    string term;
+    LexiconEntry entry;
+    PostingsIter iter;
+    uint32_t currentDoc;
+    uint32_t currentTf;
+    double idf;
+    bool valid;
+    
+    TermIterator(const string& t, const LexiconEntry& e, IndexReader* rdr, uint32_t N) 
+        : term(t), entry(e), currentDoc(0), currentTf(0), valid(false) {
+        iter.init(rdr, e.startBlock, e.endBlock);
+        idf = idf_BM25(N, e.postings);
+        advance();
+    }
+    
+    void advance() {
+        if (iter.has()) {
+            currentDoc = iter.doc();
+            currentTf = iter.tf();
+            valid = true;
+        } else {
+            valid = false;
+        }
+    }
+    
+    void next() {
+        iter.next();
+        advance();
+    }
+    
+    bool has() const { return valid; }
+    uint32_t doc() const { return currentDoc; }
+    uint32_t tf() const { return currentTf; }
+};
+
+// Multi-term OR processing (disjunctive)
+static void runMultiTerm_OR(const vector<string>& terms, QueryEnv& env) {
+    cerr << "🚀 Executing multi-term OR query...\n";
+    
+    vector<TermIterator> iterators;
+    uint32_t N = env.ds.N ? env.ds.N : 1u<<31;
+    
+    // Initialize iterators for all terms
+    for (const auto& term : terms) {
+        auto it = env.lex.find(term);
+        if (it == env.lex.end()) {
+            cerr << "[WARN] Term '"<<term<<"' not found in lexicon.\n";
+            continue;
+        }
+        
+        cerr << "[INFO] Term '"<<term<<"' found: " << it->second.postings << " postings\n";
+        iterators.emplace_back(term, it->second, env.rdr, N);
+    }
+    
+    if (iterators.empty()) {
+        cerr << "[WARN] No valid terms found.\n";
+        return;
+    }
+    
+    size_t K = CFG.topk;
+    vector<pair<double,uint32_t>> top; // score, docID
+    top.reserve(K+1);
+    
+    double avgdl = env.ds.avgdl > 0 ? env.ds.avgdl : 1.0;
+    unordered_map<uint32_t, double> docScores; // docID -> total score
+    
+    // DAAT traversal
+    while (true) {
+        uint32_t minDoc = UINT32_MAX;
+        
+        // Find minimum doc ID among all iterators
+        for (auto& it : iterators) {
+            if (it.has() && it.doc() < minDoc) {
+                minDoc = it.doc();
+            }
+        }
+        
+        if (minDoc == UINT32_MAX) break; // All iterators exhausted
+        
+        // Accumulate scores for current document
+        double docScore = 0.0;
+        uint32_t dl = (env.ds.len.size() > minDoc ? env.ds.len[minDoc] : 1u);
+        
+        for (auto& it : iterators) {
+            if (it.has() && it.doc() == minDoc) {
+                double termScore = it.idf * tf_BM25(it.tf(), dl, avgdl);
+                docScore += termScore;
+                it.next(); // Advance this iterator
+            }
+        }
+        
+        docScores[minDoc] = docScore;
+        
+        // Update top-K heap
+        if (top.size() < K) {
+            top.emplace_back(docScore, minDoc);
+            if (top.size() == K) {
+                nth_element(top.begin(), top.begin()+K-1, top.end(),
+                            [](auto&a, auto&b){ return a.first > b.first; });
+            }
+        } else if (docScore > top[K-1].first) {
+            top[K-1] = {docScore, minDoc};
+            nth_element(top.begin(), top.begin()+K-1, top.end(),
+                        [](auto&a, auto&b){ return a.first > b.first; });
+        }
+    }
+    
+    sort(top.begin(), top.end(), [](auto&a, auto&b){ return a.first > b.first; });
+    cout << "Top " << top.size() << " results for OR query:\n";
+    for (size_t i=0;i<top.size();++i) {
+        cout << setw(2) << (i+1) << ". doc=" << top[i].second << " score=" << fixed << setprecision(4) << top[i].first << "\n";
+    }
+}
+
+// Multi-term AND processing (conjunctive)
+static void runMultiTerm_AND(const vector<string>& terms, QueryEnv& env) {
+    cerr << "🚀 Executing multi-term AND query...\n";
+    
+    vector<TermIterator> iterators;
+    uint32_t N = env.ds.N ? env.ds.N : 1u<<31;
+    
+    // Initialize iterators for all terms
+    for (const auto& term : terms) {
+        auto it = env.lex.find(term);
+        if (it == env.lex.end()) {
+            cerr << "[WARN] Term '"<<term<<"' not found in lexicon.\n";
+            cerr << "[INFO] AND query requires ALL terms to be found.\n";
+            return;
+        }
+        
+        cerr << "[INFO] Term '"<<term<<"' found: " << it->second.postings << " postings\n";
+        iterators.emplace_back(term, it->second, env.rdr, N);
+    }
+    
+    if (iterators.empty()) {
+        cerr << "[WARN] No valid terms found.\n";
+        return;
+    }
+    
+    size_t K = CFG.topk;
+    vector<pair<double,uint32_t>> top; // score, docID
+    top.reserve(K+1);
+    
+    double avgdl = env.ds.avgdl > 0 ? env.ds.avgdl : 1.0;
+    
+    // DAAT traversal for AND - simpler approach
+    while (true) {
+        // Find minimum doc ID among all iterators
+        uint32_t minDoc = UINT32_MAX;
+        bool allValid = true;
+        
+        for (const auto& it : iterators) {
+            if (!it.has()) {
+                allValid = false;
+                break;
+            }
+            if (it.doc() < minDoc) {
+                minDoc = it.doc();
+            }
+        }
+        
+        if (!allValid || minDoc == UINT32_MAX) break;
+        
+        // Check if all iterators have this document
+        bool allHaveMinDoc = true;
+        for (const auto& it : iterators) {
+            if (!it.has() || it.doc() != minDoc) {
+                allHaveMinDoc = false;
+                break;
+            }
+        }
+        
+        if (allHaveMinDoc) {
+            // This document contains ALL terms - calculate score
+            double docScore = 0.0;
+            uint32_t dl = (env.ds.len.size() > minDoc ? env.ds.len[minDoc] : 1u);
+            
+            for (const auto& it : iterators) {
+                double termScore = it.idf * tf_BM25(it.tf(), dl, avgdl);
+                docScore += termScore;
+            }
+            
+            // Update top-K heap
+            if (top.size() < K) {
+                top.emplace_back(docScore, minDoc);
+                if (top.size() == K) {
+                    nth_element(top.begin(), top.begin()+K-1, top.end(),
+                                [](auto&a, auto&b){ return a.first > b.first; });
+                }
+            } else if (docScore > top[K-1].first) {
+                top[K-1] = {docScore, minDoc};
+                nth_element(top.begin(), top.begin()+K-1, top.end(),
+                            [](auto&a, auto&b){ return a.first > b.first; });
+            }
+        }
+        
+        // Advance all iterators that are at minDoc
+        for (auto& it : iterators) {
+            if (it.has() && it.doc() == minDoc) {
+                it.next();
+            }
+        }
+    }
+    
+    sort(top.begin(), top.end(), [](auto&a, auto&b){ return a.first > b.first; });
+    cout << "Top " << top.size() << " results for AND query:\n";
+    for (size_t i=0;i<top.size();++i) {
+        cout << setw(2) << (i+1) << ". doc=" << top[i].second << " score=" << fixed << setprecision(4) << top[i].first << "\n";
+    }
+}
+
+// Simple BM25 disjunctive (OR) over single term
 static void runSingleTerm_OR(const string& term, QueryEnv& env) {
-    cerr << "🚀 Executing query...\n";
+    cerr << "🚀 Executing single-term query...\n";
     auto it = env.lex.find(term);
     if (it == env.lex.end()) {
         cerr << "[WARN] Term '"<<term<<"' not found in lexicon.\n";
@@ -512,11 +725,16 @@ int main(int argc, char** argv) {
     try {
         auto env = setup(terms);
 
-        if (terms.size()==1 && !CFG.conjunctive) {
+        if (terms.size() == 1) {
+            // Single term query
             runSingleTerm_OR(terms[0], env);
         } else {
-            // Minimal multi-term path (OR). Extend as needed.
-            for (auto& t: terms) runSingleTerm_OR(t, env);
+            // Multi-term query
+            if (CFG.conjunctive) {
+                runMultiTerm_AND(terms, env);
+            } else {
+                runMultiTerm_OR(terms, env);
+            }
         }
     } catch (const exception& ex) {
         cerr << "[FATAL] " << ex.what() << "\n";

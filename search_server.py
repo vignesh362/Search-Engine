@@ -68,26 +68,24 @@ class SearchHandler(BaseHTTPRequestHandler):
         mode_str = "conjunctive (AND)" if conjunctive else "disjunctive (OR)"
         print(f"[Step 1] Running QueryProcessing in {mode_str} mode...")
         try:
-            # Split query into individual terms for proper processing
+            # Split query into individual terms
             query_terms = query.strip().split()
             if not query_terms:
                 return []
             
-            # Join terms with spaces for QueryProcessing
-            query_for_search = ' '.join(query_terms)
             print(f"[Step 1] Query terms: {query_terms}")
             
-            query_cmd = ['./QueryProcessing', query_for_search, '-k', str(topk)]
+            # Use the fixed QueryProcessing with proper multi-term support
+            query_cmd = ['./QueryProcessing'] + query_terms + ['-k', str(topk)]
             if conjunctive:
-                query_cmd.append('--and')
+                query_cmd.append('-and')
             
             query_output = subprocess.check_output(
                 query_cmd, 
                 stderr=subprocess.STDOUT
-            ).decode('utf-8', errors='ignore')  # Ignore invalid UTF-8 bytes
+            ).decode('utf-8', errors='ignore')
             
             # Parse document IDs and scores from output
-            # Format: " 1. doc=6233096 score=20.5415"
             doc_pattern = re.compile(r'doc=(\d+)\s+score=([\d.]+)')
             matches = doc_pattern.findall(query_output)
             
@@ -108,7 +106,7 @@ class SearchHandler(BaseHTTPRequestHandler):
                 './SnippetExtractor',
                 '--store-dir', 'index_output',
                 '--docs', doc_ids_str,
-                '--query', query_for_search,  # Use the processed query for highlighting
+                '--query', query,  # Use the original query for highlighting
                 '--windowsz', '50',
                 '--per', '2'
             ]
