@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genie Search</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: arial, sans-serif;
+            background: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header with Logo */
+        .header {
+            padding: 20px 30px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #ebebeb;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo {
+            font-size: 1.8rem;
+            font-weight: normal;
+        }
+
+        .logo-icon {
+            font-size: 1.5rem;
+        }
+
+        .logo-g { color: #4285f4; }
+        .logo-e1 { color: #ea4335; }
+        .logo-n { color: #fbbc04; }
+        .logo-i { color: #4285f4; }
+        .logo-e2 { color: #34a853; }
+
+        /* Search Bar Area */
+        .search-area {
+            padding: 20px 30px;
+            border-bottom: 1px solid #ebebeb;
+        }
+
+        .search-box-container {
+            max-width: 690px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .search-box {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            border: 1px solid #dfe1e5;
+            border-radius: 24px;
+            padding: 10px 15px;
+            background: #fff;
+            box-shadow: 0 1px 6px rgba(32,33,36,.28);
+            transition: box-shadow 0.2s;
+        }
+
+        .search-box:hover {
+            box-shadow: 0 1px 6px rgba(32,33,36,.38);
+        }
+
+        .search-box:focus-within {
+            box-shadow: 0 1px 6px rgba(32,33,36,.48);
+            border-color: transparent;
+        }
+
+        .search-icon {
+            color: #9aa0a6;
+            font-size: 1.2rem;
+            margin-right: 12px;
+        }
+
+        #searchInput {
+            flex: 1;
+            border: none;
+            outline: none;
+            font-size: 16px;
+            color: #202124;
+            font-family: arial, sans-serif;
+        }
+
+        .clear-btn {
+            background: none;
+            border: none;
+            color: #70757a;
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 0 8px;
+            display: none;
+        }
+
+        .clear-btn.visible {
+            display: block;
+        }
+
+        .search-btn {
+            background: #4285f4;
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        .search-btn:hover {
+            background: #1a73e8;
+            box-shadow: 0 1px 2px rgba(0,0,0,.2);
+        }
+
+        .results-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #70757a;
+        }
+
+        .results-selector select {
+            padding: 6px 10px;
+            border: 1px solid #dfe1e5;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #202124;
+            background: white;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .results-selector select:hover {
+            border-color: #c6c6c6;
+        }
+
+        /* Search Mode Toggle */
+        .search-mode {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #70757a;
+        }
+
+        .mode-toggle {
+            display: flex;
+            background: #f1f3f4;
+            border-radius: 20px;
+            padding: 2px;
+        }
+
+        .mode-toggle label {
+            padding: 6px 14px;
+            border-radius: 18px;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .mode-toggle input[type="radio"] {
+            display: none;
+        }
+
+        .mode-toggle input[type="radio"]:checked + span {
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+            font-weight: 500;
+            color: #202124;
+        }
+
+        .mode-toggle span {
+            color: #5f6368;
+        }
+
+        /* Tools/Stats Bar */
+        .tools-bar {
+            padding: 12px 30px;
+            background: #fff;
+            border-bottom: 1px solid #ebebeb;
+        }
+
+        .stats {
+            font-size: 14px;
+            color: #70757a;
+        }
+
+        /* Results Area */
+        .results-container {
+            flex: 1;
+            max-width: 650px;
+            padding: 20px 30px;
+        }
+
+        .result-item {
+            margin-bottom: 30px;
+        }
+
+        .result-url {
+            font-size: 14px;
+            color: #202124;
+            margin-bottom: 3px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .result-url-icon {
+            font-size: 18px;
+        }
+
+        .result-title {
+            font-size: 20px;
+            font-weight: normal;
+            margin-bottom: 3px;
+        }
+
+        .result-title a {
+            color: #1a0dab;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .result-title a:hover {
+            text-decoration: underline;
+        }
+
+        .result-title a:visited {
+            color: #681da8;
+        }
+
+        .result-snippet {
+            font-size: 14px;
+            line-height: 1.58;
+            color: #4d5156;
+            margin-top: 4px;
+        }
+
+        .result-snippet b {
+            font-weight: bold;
+            color: #202124;
+        }
+
+        .result-meta {
+            font-size: 12px;
+            color: #70757a;
+            margin-top: 8px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #70757a;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4285f4;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fce8e6;
+            color: #c5221f;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin: 20px 30px;
+            border-left: 4px solid #c5221f;
+            font-size: 14px;
+        }
+
+        .no-results {
+            padding: 40px 20px;
+            color: #70757a;
+            font-size: 14px;
+        }
+
+        /* Log Section - Collapsible at bottom */
+        .log-toggle {
+            position: fixed;
+            bottom: 0;
+            right: 20px;
+            background: #202124;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 8px 8px 0 0;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.2);
+            z-index: 1000;
+            user-select: none;
+        }
+
+        .log-toggle:hover {
+            background: #303134;
+        }
+
+        .log-section {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.75rem;
+            max-height: 250px;
+            overflow-y: auto;
+            box-shadow: 0 -4px 15px rgba(0,0,0,0.3);
+            z-index: 999;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+        }
+
+        .log-section.open {
+            transform: translateY(0);
+        }
+
+        .log-header {
+            color: white;
+            font-weight: bold;
+            margin-bottom: 8px;
+            font-size: 0.85rem;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .log-close {
+            cursor: pointer;
+            color: #aaa;
+            font-size: 1.2rem;
+            line-height: 1;
+        }
+
+        .log-close:hover {
+            color: #fff;
+        }
+
+        .log-entry {
+            margin: 3px 0;
+            padding: 1px 0;
+        }
+
+        .log-timestamp {
+            color: #888;
+            margin-right: 8px;
+        }
+
+        .log-info { color: #00ff00; }
+        .log-warn { color: #ffaa00; }
+        .log-error { color: #ff4444; }
+
+        .hidden {
+            display: none;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #dadce0;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #bdc1c6;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header, .search-area, .tools-bar, .results-container {
+                padding-left: 15px;
+                padding-right: 15px;
+            }
+
+            .search-box-container {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .results-selector {
+                justify-content: flex-end;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo-section">
+            <div class="logo">
+                <span class="logo-icon">🧞</span>
+                <span class="logo-g">G</span><span class="logo-e1">e</span><span class="logo-n">n</span><span class="logo-i">i</span><span class="logo-e2">e</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Area -->
+    <div class="search-area">
+        <div class="search-box-container">
+            <div class="search-box">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="searchInput" placeholder="Search" autofocus>
+                <button class="clear-btn" id="clearBtn" onclick="clearSearch()">✕</button>
+            </div>
+            <button class="search-btn" onclick="performSearch()">Search</button>
+            <div class="search-mode">
+                <span>Mode:</span>
+                <div class="mode-toggle">
+                    <label>
+                        <input type="radio" name="searchMode" value="or" checked>
+                        <span>OR</span>
+                    </label>
+                    <label>
+                        <input type="radio" name="searchMode" value="and">
+                        <span>AND</span>
+                    </label>
+                </div>
+            </div>
+            <div class="results-selector">
+                <label for="topN">Results:</label>
+                <select id="topN">
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="20">20</option>
+                    <option value="30">30</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div id="toolsBar" class="tools-bar hidden">
+        <div id="stats" class="stats"></div>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsArea" class="hidden">
+        <div class="results-container">
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <!-- Log Toggle Button -->
+    <div class="log-toggle" onclick="toggleLogs()">
+        📊 System Logs
+    </div>
+
+    <!-- Log Section -->
+    <div class="log-section" id="logSection">
+        <div class="log-header">
+            <span>🔧 System Logs</span>
+            <span class="log-close" onclick="toggleLogs()">×</span>
+        </div>
+        <div id="logContainer"></div>
+    </div>
+
+    <script>
+        let logEntries = [];
+
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logClass = `log-${type}`;
+            logEntries.push({timestamp, message, type});
+            
+            const logContainer = document.getElementById('logContainer');
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.innerHTML = `<span class="log-timestamp">[${timestamp}]</span><span class="${logClass}">${message}</span>`;
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function toggleLogs() {
+            const logSection = document.getElementById('logSection');
+            logSection.classList.toggle('open');
+        }
+
+        function clearSearch() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('clearBtn').classList.remove('visible');
+            document.getElementById('searchInput').focus();
+        }
+
+        // Show/hide clear button
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const clearBtn = document.getElementById('clearBtn');
+            if (e.target.value) {
+                clearBtn.classList.add('visible');
+            } else {
+                clearBtn.classList.remove('visible');
+            }
+        });
+
+        // Add initial log
+        addLog('System initialized. Ready to search 8.8M documents!', 'info');
+
+        // Allow Enter key to search
+        document.getElementById('searchInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+
+        async function performSearch() {
+            const query = document.getElementById('searchInput').value.trim();
+            const topN = parseInt(document.getElementById('topN').value);
+            const searchMode = document.querySelector('input[name="searchMode"]:checked').value;
+            const conjunctive = (searchMode === 'and');
+            
+            if (!query) {
+                addLog('Empty query submitted', 'warn');
+                return;
+            }
+
+            addLog(`Starting search for: "${query}" (${searchMode.toUpperCase()} mode, top ${topN})`, 'info');
+            
+            const resultsArea = document.getElementById('resultsArea');
+            const resultsDiv = document.getElementById('results');
+            const statsDiv = document.getElementById('stats');
+            const toolsBar = document.getElementById('toolsBar');
+            
+            resultsArea.classList.remove('hidden');
+            toolsBar.classList.remove('hidden');
+            resultsDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Searching...</div>';
+            statsDiv.innerHTML = '';
+
+            try {
+                const startTime = Date.now();
+                addLog('Sending request to backend...', 'info');
+                
+                const response = await fetch('/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        query: query,
+                        topk: topN,
+                        conjunctive: conjunctive
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const endTime = Date.now();
+                const duration = ((endTime - startTime) / 1000).toFixed(2);
+                
+                addLog(`Search completed in ${duration}s`, 'info');
+                addLog(`Found ${data.results.length} results`, 'info');
+                
+                displayResults(data, duration);
+                
+            } catch (error) {
+                addLog(`Error: ${error.message}`, 'error');
+                resultsDiv.innerHTML = '';
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error';
+                errorDiv.innerHTML = `❌ Error: ${error.message}<br><small>Check the system logs for more details.</small>`;
+                document.querySelector('.search-area').after(errorDiv);
+                setTimeout(() => errorDiv.remove(), 5000);
+            }
+        }
+
+        function displayResults(data, duration) {
+            const resultsDiv = document.getElementById('results');
+            const statsDiv = document.getElementById('stats');
+
+            if (data.results.length === 0) {
+                statsDiv.innerHTML = `No results found`;
+                resultsDiv.innerHTML = `
+                    <div class="no-results">
+                        <p>Your search - <strong>${data.query}</strong> - did not match any documents.</p>
+                        <p style="margin-top: 10px;">Suggestions:</p>
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>Make sure all words are spelled correctly.</li>
+                            <li>Try different keywords.</li>
+                            <li>Try more general keywords.</li>
+                        </ul>
+                    </div>
+                `;
+                addLog('No results found', 'warn');
+                return;
+            }
+
+            const resultCount = data.results.length.toLocaleString();
+            statsDiv.innerHTML = `About ${resultCount} results (${duration} seconds)`;
+
+            let html = '';
+            data.results.forEach((result, index) => {
+                const snippetsHtml = result.snippets.map(s => 
+                    `<div class="result-snippet">${s}</div>`
+                ).join('');
+
+                html += `
+                    <div class="result-item">
+                        <div class="result-url">
+                            <span class="result-url-icon">📄</span>
+                            <span>Document ID: ${result.docID}</span>
+                        </div>
+                        <div class="result-title">
+                            <a href="#doc-${result.docID}">Document ${result.docID}</a>
+                        </div>
+                        ${snippetsHtml}
+                        <div class="result-meta">BM25 Score: ${result.score.toFixed(4)}</div>
+                    </div>
+                `;
+            });
+
+            resultsDiv.innerHTML = html;
+            addLog(`Displayed ${data.results.length} results`, 'info');
+        }
+
+        // Add some welcome logs
+        setTimeout(() => addLog('Index loaded: 3.7M unique terms', 'info'), 500);
+        setTimeout(() => addLog('Backend connection established', 'info'), 1000);
+    </script>
+</body>
+</html>
