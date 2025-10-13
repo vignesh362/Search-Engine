@@ -19,11 +19,11 @@ struct Config {
     string docidsize_bin = "docidsize.bin";
     string freqsize_bin  = "freqsize.bin";
     string lexicon_tsv   = "lexicon.tsv";
-    string collection_tsv = "collection.tsv"; // optional: docID \t ... \t length
+    string collection_tsv = "collection.tsv";
     size_t topk = 10;
-    bool conjunctive = false;  // default OR
-    float k1 = 1.2f; // BM25 parameter Term Frequency Saturation
-    float b  = 0.75f; // BM25 parameter Length Normalization Factor
+    bool conjunctive = false;
+    float k1 = 1.2f;
+    float b  = 0.75f;
 } CFG;
 
 // ------------------------- Small utils / IO ---------------------------
@@ -37,27 +37,34 @@ static inline string pathJoin(const string& a, const string& b) {
 }
 
 // ------------------------------- VarByte ------------------------------
-// VarByte format from BuildIndex: buf[n-1] first (< 128), then buf[n-2..0] with MSB=1 (>= 128)
-// So: [high_7bits < 128], [mid_7bits | 0x80], ..., [low_7bits | 0x80]
-// Example: 128 = [1, 128]: (1 << 7) | (128 & 0x7F) = 128 + 0 = 128
-// Example: 300 = [2, 172]: (2 << 7) | (172 & 0x7F) = 256 + 44 = 300
 struct VarByte {
-    // decode one uint32 from ptr (advance ptr)
-    static inline uint32_t decode(const uint8_t *&p) {
-        // First byte always has MSB=0 (value 0-127)
+    // FIXED: Added bounds checking and proper termination
+    static inline uint32_t decode(const uint8_t *&p, const uint8_t* end) {
+        if (p >= end) {
+            throw runtime_error("VarByte decode: buffer overrun");
+        }
+        
+        // First byte (MSB=0, value 0-127)
         uint8_t b = *p++;
         uint32_t x = b;
         
-        // Continue reading while we see bytes with MSB=1 (>= 128)
-        // These are the continuation bytes
-        while (*p >= 128) {
+        int iterations = 0;
+        const int MAX_ITERATIONS = 5; // uint32 max is 5 bytes in varbyte
+        
+        // Continue while MSB is set AND we haven't hit the end
+        while (p < end && (*p >= 128) && iterations < MAX_ITERATIONS) {
             b = *p++;
             x = (x << 7) | (b & 0x7F);
+            iterations++;
         }
+        
+        if (iterations >= MAX_ITERATIONS) {
+            throw runtime_error("VarByte decode: too many continuation bytes");
+        }
+        
         return x;
     }
     
-    // encode one uint32 to a vector (match BuildIndex format)
     static inline void encode(uint32_t v, vector<uint8_t>& out) {
         uint8_t buf[10];
         int n = 0;
@@ -65,7 +72,6 @@ struct VarByte {
             buf[n++] = (uint8_t)(v & 0x7F);
             v >>= 7;
         } while (v != 0);
-        // Write last byte first (MSB=0), then others with MSB=1
         out.push_back(buf[n - 1]);
         for (int i = n - 2; i >= 0; --i) {
             out.push_back(buf[i] | 0x80);
@@ -75,10 +81,10 @@ struct VarByte {
 
 // ------------------------- Loaded Metadata ----------------------------
 struct Meta {
-    vector<uint32_t> lastDoc;     // size = #blocks
-    vector<uint32_t> docBytes;    // size = #blocks
-    vector<uint32_t> freqBytes;   // size = #blocks
-    vector<uint64_t> blockByteOff; // prefix sum of (docBytes+freqBytes), for block i
+    vector<uint32_t> lastDoc;
+    vector<uint32_t> docBytes;
+    vector<uint32_t> freqBytes;
+    vector<uint64_t> blockByteOff;
     uint64_t totalBytes = 0;
 
     void buildOffsets() {
@@ -102,25 +108,23 @@ static vector<uint32_t> readU32File(const string& filePath) {
     size_t n = bytes / 4;
     vector<uint32_t> v(n);
     in.read(reinterpret_cast<char*>(v.data()), bytes);
+    if (!in) throw runtime_error("Failed to read file: " + filePath);
     return v;
 }
 
 // ------------------------------- Lexicon ------------------------------
 struct LexiconEntry {
     string term;
-    uint32_t startBlock = 0; // inclusive
-    uint32_t endBlock   = 0; // inclusive
-    uint32_t postings   = 0; // ft
-    uint64_t offset     = 0; // byte offset into invlists.bin where the term list begins (optional)
+    uint32_t startBlock = 0;
+    uint32_t endBlock   = 0;
+    uint32_t postings   = 0;
+    uint64_t offset     = 0;
 };
 
-// tries to auto-detect numeric columns in line tokens
 static bool parseLexiconLine(const vector<string>& tok, LexiconEntry& e) {
-    // expect at least 3 columns; typically term and several numeric fields
     if (tok.size() < 3) return false;
     e.term = tok[0];
 
-    // collect numeric columns
     vector<long double> nums;
     vector<int> idx;
     for (int i=1;i<(int)tok.size();++i) {
@@ -132,27 +136,15 @@ static bool parseLexiconLine(const vector<string>& tok, LexiconEntry& e) {
     }
     if (nums.empty()) return false;
 
-    // Heuristic:
-    // - postings (ft) is reasonable (>=1), blocks are integers and start<=end, offset is large-ish.
-    // We'll map by count:
-    //   4 numeric: [startBlock, endBlock, postings, offset] (order may vary)
-    //   3 numeric: [startBlock, endBlock, postings] (offset omitted)
-    // Fallback: guess by relative magnitude.
     auto asU32 = [&](long double v){ return (uint32_t) llround(v); };
     auto asU64 = [&](long double v){ return (uint64_t) llround(v); };
 
     if (nums.size() >= 4) {
-        // sort by value to guess: smallest ~startBlock, next ~endBlock, then postings, largest ~offset
-        vector<pair<long double,int>> p;
-        for (int k=0;k<(int)nums.size();++k) p.push_back({nums[k], k});
-        // But postings may be < blocks count; better: choose largest as offset (very likely bytes)
         int k_offset = max_element(nums.begin(), nums.end()) - nums.begin();
-        // remove that, then among remaining, choose min as startBlock, max as endBlock, leftover as postings
         vector<int> rem;
         for (int k=0;k<(int)nums.size();++k) if (k != k_offset) rem.push_back(k);
         int k_min = rem[0], k_max = rem[0];
         for (int k: rem) { if (nums[k] < nums[k_min]) k_min = k; if (nums[k] > nums[k_max]) k_max = k; }
-        // leftover:
         int k_post = -1; for (int k: rem) if (k != k_min && k != k_max) { k_post = k; break; }
         e.startBlock = asU32(nums[k_min]);
         e.endBlock   = asU32(nums[k_max]);
@@ -160,8 +152,6 @@ static bool parseLexiconLine(const vector<string>& tok, LexiconEntry& e) {
         e.offset     = asU64(nums[k_offset]);
         return true;
     } else if (nums.size() == 3) {
-        // assume startBlock, endBlock, postings
-        // smallest=start, largest=end, middle=postings
         int k_min=0, k_max=0;
         for (int k=1;k<3;++k) { if (nums[k] < nums[k_min]) k_min=k; if (nums[k] > nums[k_max]) k_max=k; }
         int k_mid = 3 - k_min - k_max;
@@ -181,7 +171,6 @@ static unordered_map<string, LexiconEntry> loadLexicon(const string& filePath) {
     string line;
     while (getline(in, line)) {
         if (line.empty()) continue;
-        // split by tab/space
         vector<string> tok; tok.reserve(8);
         {
             string tmp; tmp.reserve(line.size());
@@ -200,7 +189,7 @@ static unordered_map<string, LexiconEntry> loadLexicon(const string& filePath) {
 
 // ------------------------ Document lengths (optional) -----------------
 struct DocStats {
-    vector<uint32_t> len;   // doc length (tokens) by docID (0-based)
+    vector<uint32_t> len;
     uint64_t totalLen = 0;
     uint32_t N = 0;
     double avgdl = 1.0;
@@ -208,12 +197,10 @@ struct DocStats {
 
 static DocStats loadDocStatsOptional(const string& collection_tsv) {
     DocStats ds; ds.N=0; ds.avgdl = 1.0;
-    if (!fileExists(collection_tsv)) return ds; // will fill later on first query if needed
+    if (!fileExists(collection_tsv)) return ds;
     ifstream in(collection_tsv);
     if (!in) return ds;
     string line;
-    // Expect at least: docID<TAB>...<TAB>length
-    // We will detect docID as first integer on the line and last integer as length.
     uint32_t maxDoc = 0;
     vector<pair<uint32_t,uint32_t>> pairs;
     while (getline(in, line)) {
@@ -227,7 +214,6 @@ static DocStats loadDocStatsOptional(const string& collection_tsv) {
             }
             if (!t.empty()) tok.push_back(t);
         }
-        // find first and last integers
         int firstI=-1, lastI=-1;
         for (int i=0;i<(int)tok.size();++i) {
             try { stoll(tok[i]); if (firstI==-1) firstI=i; lastI=i; } catch(...) {}
@@ -253,27 +239,32 @@ class IndexReader {
 public:
     explicit IndexReader(const Config& cfg)
     : cfg_(cfg) {
-        // load metadata
-        meta_.lastDoc = readU32File(pathJoin(cfg_.index_dir, cfg_.lastdocid_bin));
-        meta_.docBytes= readU32File(pathJoin(cfg_.index_dir, cfg_.docidsize_bin));
-        meta_.freqBytes=readU32File(pathJoin(cfg_.index_dir, cfg_.freqsize_bin));
-        if (meta_.docBytes.size() != meta_.freqBytes.size()
-         || meta_.docBytes.size() != meta_.lastDoc.size()) {
-            throw runtime_error("Metadata arrays sizes differ");
+        try {
+            meta_.lastDoc = readU32File(pathJoin(cfg_.index_dir, cfg_.lastdocid_bin));
+            meta_.docBytes= readU32File(pathJoin(cfg_.index_dir, cfg_.docidsize_bin));
+            meta_.freqBytes=readU32File(pathJoin(cfg_.index_dir, cfg_.freqsize_bin));
+            
+            cerr << "[INFO] Loaded metadata: " << meta_.docBytes.size() << " blocks\n";
+            
+            if (meta_.docBytes.size() != meta_.freqBytes.size()
+             || meta_.docBytes.size() != meta_.lastDoc.size()) {
+                throw runtime_error("Metadata arrays sizes differ");
+            }
+            meta_.buildOffsets();
+
+            invPath_ = pathJoin(cfg_.index_dir, cfg_.invlists_bin);
+            inv_.open(invPath_, ios::binary);
+            if (!inv_) throw runtime_error("Cannot open invlists: " + invPath_);
+
+            L_ = loadLexicon(pathJoin(cfg_.index_dir, cfg_.lexicon_tsv));
+        } catch (const exception& e) {
+            cerr << "[ERROR] IndexReader constructor failed: " << e.what() << "\n";
+            throw;
         }
-        meta_.buildOffsets();
-
-        // map invlists file
-        invPath_ = pathJoin(cfg_.index_dir, cfg_.invlists_bin);
-        inv_.open(invPath_, ios::binary);
-        if (!inv_) throw runtime_error("Cannot open invlists: " + invPath_);
-
-        // load lexicon
-        L_ = loadLexicon(pathJoin(cfg_.index_dir, cfg_.lexicon_tsv));
     }
 
     struct BlockData {
-        vector<uint32_t> docIDs; // absolute docIDs for this block
+        vector<uint32_t> docIDs;
         vector<uint32_t> freqs;
     };
 
@@ -281,140 +272,169 @@ public:
         const LexiconEntry* lex = nullptr;
         uint32_t curBlock = 0;
         uint32_t blockEnd = 0;
-        size_t idxInBlock = 0; // index into current decompressed block
+        size_t idxInBlock = 0;
         BlockData blk;
         bool eof = false;
     };
 
     bool openList(const string& term, ListIter& it) {
-        cerr << "[INFO] Opening list for term: '" << term << "'\n";
-        auto p = L_.find(term);
-        if (p == L_.end()) {
-            cerr << "[INFO] Term '" << term << "' not found in index\n";
+        try {
+            cerr << "[INFO] Opening list for term: '" << term << "'\n";
+            auto p = L_.find(term);
+            if (p == L_.end()) {
+                cerr << "[INFO] Term '" << term << "' not found in index\n";
+                return false;
+            }
+            
+            cerr << "[INFO] Term '" << term << "' found: " << p->second.postings 
+                 << " postings, blocks " << p->second.startBlock << "-" << p->second.endBlock << "\n";
+            
+            // CRITICAL FIX: Validate block ranges
+            if (p->second.startBlock >= meta_.docBytes.size()) {
+                cerr << "[ERROR] startBlock " << p->second.startBlock 
+                     << " >= total blocks " << meta_.docBytes.size() << "\n";
+                return false;
+            }
+            if (p->second.endBlock >= meta_.docBytes.size()) {
+                cerr << "[WARNING] endBlock " << p->second.endBlock 
+                     << " >= total blocks " << meta_.docBytes.size() 
+                     << ", clamping to " << (meta_.docBytes.size()-1) << "\n";
+                // Clamp to valid range
+                const_cast<LexiconEntry&>(p->second).endBlock = (uint32_t)(meta_.docBytes.size() - 1);
+            }
+            
+            it.lex = &p->second;
+            it.curBlock = it.lex->startBlock;
+            it.blockEnd = it.lex->endBlock;
+            it.idxInBlock = 0;
+            it.blk.docIDs.clear();
+            it.blk.freqs.clear();
+            it.eof = false;
+            
+            if (it.curBlock > it.blockEnd) { 
+                it.eof = true; 
+                return true; 
+            }
+            
+            cerr << "[INFO] Loading first block " << it.curBlock << "...\n";
+            loadBlock(it.curBlock, it.blk);
+            cerr << "[INFO] First block loaded with " << it.blk.docIDs.size() << " postings\n";
+            it.idxInBlock = 0;
+            return true;
+        } catch (const exception& e) {
+            cerr << "[ERROR] openList failed for term '" << term << "': " << e.what() << "\n";
             return false;
         }
-        cerr << "[INFO] Term '" << term << "' found: " << p->second.postings << " postings, blocks " << p->second.startBlock << "-" << p->second.endBlock << "\n";
-        it.lex = &p->second;
-        it.curBlock = it.lex->startBlock;
-        it.blockEnd = it.lex->endBlock;
-        it.idxInBlock = 0;
-        it.blk.docIDs.clear();
-        it.blk.freqs.clear();
-        it.eof = false;
-        if (it.curBlock > it.blockEnd) { it.eof = true; return true; }
-        // preload first block
-        cerr << "[INFO] Loading first block " << it.curBlock << "...\n";
-        loadBlock(it.curBlock, it.blk);
-        cerr << "[INFO] First block loaded with " << it.blk.docIDs.size() << " postings\n";
-        it.idxInBlock = 0;
-        // Move idx to first posting of this term inside first block if lists share blocks:
-        // (If your builder lets lists start/end mid-block, the lexicon should also carry
-        // per-term first/last slot; for simplicity we assume blocks here fully belong to term.)
-        return true;
     }
 
-    // next posting (docID,freq). Returns false at end.
     bool next(ListIter& it, uint32_t& doc, uint32_t& freq) {
-        if (it.eof) return false;
-        while (true) {
-            if (it.idxInBlock < it.blk.docIDs.size()) {
-                doc = it.blk.docIDs[it.idxInBlock];
-                freq= it.blk.freqs[it.idxInBlock];
-                ++it.idxInBlock;
-                return true;
-            }
-            // advance to next block
-            if (it.curBlock >= it.blockEnd) {
-                it.eof = true; return false;
-            }
-            ++it.curBlock;
-            loadBlock(it.curBlock, it.blk);
-            it.idxInBlock = 0;
-        }
-    }
-
-    // Decode the block with global block index bIdx into bd
-    void loadBlock(uint32_t bIdx, BlockData& bd) {
-        static bool debug = getenv("DEBUG_QUERY") != nullptr;
-        
-        if (debug) cerr << "[DEBUG] loadBlock " << bIdx << "\n";
-        
-        uint64_t base = meta_.blockByteOff[bIdx];
-        uint32_t dsz = meta_.docBytes[bIdx];
-        uint32_t fsz = meta_.freqBytes[bIdx];
-
-        if (debug) cerr << "[DEBUG]   base=" << base << " dsz=" << dsz << " fsz=" << fsz << "\n";
-
-        // read doc bytes
-        vector<uint8_t> buf(dsz + fsz);
-        inv_.seekg((std::streamoff)base);
-        inv_.read(reinterpret_cast<char*>(buf.data()), buf.size());
-        const uint8_t* pDoc = buf.data();
-        const uint8_t* pFreq= buf.data() + dsz;
-        const uint8_t* endDoc= pFreq;
-        const uint8_t* endFreq= buf.data() + buf.size();
-
-        if (debug) cerr << "[DEBUG]   Decoding docs...\n";
-        
-        // decode doc gaps & reconstruct absolute docIDs
-        bd.docIDs.clear(); bd.freqs.clear();
-        // We don't know count; use freq stream as limiter. Strategy:
-        // - Decode docs until we hit endDoc; decode freqs until endFreq; counts must match.
-        vector<uint32_t> gaps;
-        int doc_count = 0;
-        while (pDoc < endDoc) {
-            if (debug && doc_count % 10 == 0) cerr << "[DEBUG]     doc " << doc_count << " pDoc offset=" << (pDoc - buf.data()) << "\n";
-            gaps.push_back(VarByte::decode(pDoc));
-            doc_count++;
-            if (doc_count > 10000) {
-                cerr << "[ERROR] Infinite loop in doc decoding! Breaking.\n";
-                break;
-            }
-        }
-        
-        if (debug) cerr << "[DEBUG]   Decoded " << gaps.size() << " doc gaps\n";
-        if (debug) cerr << "[DEBUG]   Decoding freqs...\n";
-        
-        int freq_count = 0;
-        while (pFreq < endFreq) {
-            if (debug && freq_count % 10 == 0) cerr << "[DEBUG]     freq " << freq_count << " pFreq offset=" << (pFreq - buf.data()) << "\n";
-            bd.freqs.push_back(VarByte::decode(pFreq));
-            freq_count++;
-            if (freq_count > 10000) {
-                cerr << "[ERROR] Infinite loop in freq decoding! Breaking.\n";
-                break;
-            }
-        }
-        
-        if (debug) cerr << "[DEBUG]   Decoded " << bd.freqs.size() << " freqs\n";
-        
-        if (gaps.size() != bd.freqs.size()) {
-            if (debug) cerr << "[DEBUG]   Size mismatch! Trying lockstep decode...\n";
-            // If mismatch: fall back to "try decode in lockstep" (safer if encoders did per-post var-length)
-            bd.freqs.clear(); pDoc = buf.data(); pFreq = buf.data()+dsz;
-            uint32_t last=0;
-            bd.docIDs.clear(); bd.freqs.clear();
-            int lockstep_count = 0;
-            while (pDoc < endDoc && pFreq < endFreq) {
-                uint32_t g = VarByte::decode(pDoc);
-                uint32_t f = VarByte::decode(pFreq);
-                last += g; bd.docIDs.push_back(last); bd.freqs.push_back(f);
-                lockstep_count++;
-                if (lockstep_count > 10000) {
-                    cerr << "[ERROR] Infinite loop in lockstep decoding! Breaking.\n";
-                    break;
+        try {
+            if (it.eof) return false;
+            while (true) {
+                if (it.idxInBlock < it.blk.docIDs.size()) {
+                    doc = it.blk.docIDs[it.idxInBlock];
+                    freq= it.blk.freqs[it.idxInBlock];
+                    ++it.idxInBlock;
+                    return true;
                 }
+                if (it.curBlock >= it.blockEnd) {
+                    it.eof = true; 
+                    return false;
+                }
+                ++it.curBlock;
+                
+                // Validate before loading
+                if (it.curBlock >= meta_.docBytes.size()) {
+                    cerr << "[ERROR] Attempting to load block " << it.curBlock 
+                         << " >= " << meta_.docBytes.size() << "\n";
+                    it.eof = true;
+                    return false;
+                }
+                
+                loadBlock(it.curBlock, it.blk);
+                it.idxInBlock = 0;
             }
-            if (debug) cerr << "[DEBUG]   Lockstep decoded " << bd.docIDs.size() << " postings\n";
-            return;
+        } catch (const exception& e) {
+            cerr << "[ERROR] next() failed: " << e.what() << "\n";
+            it.eof = true;
+            return false;
         }
-        uint32_t last=0;
-        for (size_t i=0;i<gaps.size();++i) { last += gaps[i]; bd.docIDs.push_back(last); }
-        
-        if (debug) cerr << "[DEBUG]   Block loaded with " << bd.docIDs.size() << " postings\n";
     }
 
-    // term -> ft (postings)
+    void loadBlock(uint32_t bIdx, BlockData& bd) {
+        try {
+            static bool debug = getenv("DEBUG_QUERY") != nullptr;
+            
+            if (debug) cerr << "[DEBUG] loadBlock " << bIdx << "\n";
+            
+            // CRITICAL: Bounds check
+            if (bIdx >= meta_.docBytes.size()) {
+                throw runtime_error("Block index " + to_string(bIdx) + 
+                                  " out of range (max: " + to_string(meta_.docBytes.size()-1) + ")");
+            }
+            
+            uint64_t base = meta_.blockByteOff[bIdx];
+            uint32_t dsz = meta_.docBytes[bIdx];
+            uint32_t fsz = meta_.freqBytes[bIdx];
+
+            if (debug) cerr << "[DEBUG]   base=" << base << " dsz=" << dsz << " fsz=" << fsz << "\n";
+            
+            if (dsz == 0 || fsz == 0) {
+                bd.docIDs.clear();
+                bd.freqs.clear();
+                return;
+            }
+
+            vector<uint8_t> buf(dsz + fsz);
+            inv_.seekg((std::streamoff)base);
+            if (!inv_) {
+                throw runtime_error("Failed to seek to offset " + to_string(base));
+            }
+            
+            inv_.read(reinterpret_cast<char*>(buf.data()), buf.size());
+            if (!inv_ || (size_t)inv_.gcount() != buf.size()) {
+                throw runtime_error("Failed to read block data (expected " + 
+                                  to_string(buf.size()) + " bytes, got " + 
+                                  to_string(inv_.gcount()) + ")");
+            }
+            
+            const uint8_t* pDoc = buf.data();
+            const uint8_t* pFreq= buf.data() + dsz;
+            const uint8_t* endDoc= pFreq;
+            const uint8_t* endFreq= buf.data() + buf.size();
+
+            bd.docIDs.clear(); 
+            bd.freqs.clear();
+            
+            // Decode with bounds checking
+            vector<uint32_t> gaps;
+            while (pDoc < endDoc) {
+                gaps.push_back(VarByte::decode(pDoc, endDoc));
+            }
+            
+            while (pFreq < endFreq) {
+                bd.freqs.push_back(VarByte::decode(pFreq, endFreq));
+            }
+            
+            if (gaps.size() != bd.freqs.size()) {
+                throw runtime_error("Gap count (" + to_string(gaps.size()) + 
+                                  ") != freq count (" + to_string(bd.freqs.size()) + ")");
+            }
+            
+            uint32_t last=0;
+            for (auto g : gaps) { 
+                last += g; 
+                bd.docIDs.push_back(last); 
+            }
+            
+            if (debug) cerr << "[DEBUG]   Block loaded with " << bd.docIDs.size() << " postings\n";
+            
+        } catch (const exception& e) {
+            cerr << "[ERROR] loadBlock(" << bIdx << ") failed: " << e.what() << "\n";
+            throw;
+        }
+    }
+
     uint32_t ft(const string& term) const {
         auto it = L_.find(term);
         return it==L_.end() ? 0u : it->second.postings;
@@ -439,7 +459,6 @@ struct BM25 {
         : k1(k1), b(b), avgdl(avgdl>0?avgdl:1.0), N(N?N:1) {}
 
     static inline double idf(uint32_t N, uint32_t ft) {
-        // classic BM25 idf
         double num = (double)N - (double)ft + 0.5;
         double den = (double)ft + 0.5;
         if (num <= 0) num = 1e-6;
@@ -466,105 +485,93 @@ static vector<Hit> runQuery(IndexReader& ir,
                             const DocStats& dsOpt,
                             const QueryOptions& opt)
 {
-    // Build iterators per term
-    vector<IndexReader::ListIter> I;
-    I.reserve(terms.size());
-    for (auto& t : terms) {
-        IndexReader::ListIter it;
-        if (!ir.openList(t, it)) continue; // term not in index
-        I.push_back(std::move(it));
-    }
-    if (I.empty()) return {};
-
-    // Prepare BM25 (N & avgdl). If collection.tsv missing, estimate N/avgdl from max docID seen lazily.
-    DocStats ds = dsOpt;
-    if (ds.N == 0) { ds.N = 1000000; ds.avgdl = 200.0; } // fallbacks
-
-    BM25 bm25(CFG.k1, CFG.b, ds.avgdl, ds.N);
-
-    // We’ll do a simple DAAT merge.
-    // Strategy:
-    //  - Disjunctive (OR): accumulate scores for any doc that appears in at least one list.
-    //  - Conjunctive (AND): only keep docs that appear in all lists.
-    // This implementation fully decompresses blocks on demand and advances pointers.
-
-    // Read first postings
-    struct Cur { uint32_t doc=UINT32_MAX; uint32_t tf=0; bool eof=true; };
-    vector<Cur> cur(I.size());
-    auto advance = [&](size_t i)->bool {
-        uint32_t d,f;
-        if (ir.next(I[i], d, f)) { cur[i] = {d,f,false}; return true; }
-        cur[i] = {UINT32_MAX,0,true}; return false;
-    };
-    for (size_t i=0;i<I.size();++i) advance(i);
-
-    auto allEof = [&](){
-        for (auto &c: cur) if (!c.eof) return false; return true;
-    };
-
-    unordered_map<uint32_t,double> accum; accum.reserve(4096);
-
-    // ft per term
-    vector<uint32_t> fts; fts.reserve(terms.size());
-    for (auto &t : terms) fts.push_back(ir.ft(t));
-
-    // Helper to fetch doclen (fallback: sum of tfs seen so far for that doc)
-    unordered_map<uint32_t,uint32_t> seenLen;
-
-    while (!allEof()) {
-        // find minimum docID among current
-        uint32_t mind = UINT32_MAX;
-        for (auto &c: cur) if (!c.eof) mind = min(mind, c.doc);
-
-        // collect this doc's tfs across lists
-        bool presentAll = true;
-        vector<pair<size_t,uint32_t>> present; present.reserve(cur.size());
-        for (size_t i=0;i<cur.size();++i) {
-            if (!cur[i].eof && cur[i].doc == mind) {
-                present.push_back({i, cur[i].tf});
-            } else {
-                if (opt.conjunctive) presentAll = false;
-            }
+    try {
+        vector<IndexReader::ListIter> I;
+        I.reserve(terms.size());
+        for (auto& t : terms) {
+            IndexReader::ListIter it;
+            if (!ir.openList(t, it)) continue;
+            I.push_back(std::move(it));
         }
-        if (!opt.conjunctive || presentAll) {
-            // Document length:
-            uint32_t dlen = 0;
-            if (ds.len.size() > mind) dlen = ds.len[mind];
-            if (dlen == 0) {
-                // fall back to quick proxy: running sum of tfs we've seen for this doc
-                uint32_t sumtf=0; for (auto &pr: present) sumtf += pr.second;
-                dlen = max(1u, seenLen[mind] += sumtf);
-            }
-            // score sum
-            double s = 0.0;
-            for (size_t j=0;j<present.size();++j) {
-                size_t i = present[j].first;
-                uint32_t tf = present[j].second;
-                s += bm25.score(fts[i], tf, dlen);
-            }
-            if (s != 0.0) accum[mind] += s;
-        }
+        if (I.empty()) return {};
 
-        // advance lists that matched mind
-        for (size_t i=0;i<cur.size();++i) {
-            if (!cur[i].eof && cur[i].doc == mind) advance(i);
-            else if (opt.conjunctive && !presentAll) {
-                // AND-mode: we must raise lower docs to mind
-                // naive catch-up: advance until >= mind or eof
-                while (!cur[i].eof && cur[i].doc < mind) {
-                    if (!advance(i)) break;
+        DocStats ds = dsOpt;
+        if (ds.N == 0) { ds.N = 1000000; ds.avgdl = 200.0; }
+
+        BM25 bm25(CFG.k1, CFG.b, ds.avgdl, ds.N);
+
+        struct Cur { uint32_t doc=UINT32_MAX; uint32_t tf=0; bool eof=true; };
+        vector<Cur> cur(I.size());
+        
+        auto advance = [&](size_t i)->bool {
+            uint32_t d,f;
+            if (ir.next(I[i], d, f)) { cur[i] = {d,f,false}; return true; }
+            cur[i] = {UINT32_MAX,0,true}; return false;
+        };
+        
+        for (size_t i=0;i<I.size();++i) advance(i);
+
+        auto allEof = [&](){
+            for (auto &c: cur) if (!c.eof) return false; return true;
+        };
+
+        unordered_map<uint32_t,double> accum; accum.reserve(4096);
+
+        vector<uint32_t> fts; fts.reserve(terms.size());
+        for (auto &t : terms) fts.push_back(ir.ft(t));
+
+        unordered_map<uint32_t,uint32_t> seenLen;
+
+        while (!allEof()) {
+            uint32_t mind = UINT32_MAX;
+            for (auto &c: cur) if (!c.eof) mind = min(mind, c.doc);
+
+            bool presentAll = true;
+            vector<pair<size_t,uint32_t>> present; present.reserve(cur.size());
+            for (size_t i=0;i<cur.size();++i) {
+                if (!cur[i].eof && cur[i].doc == mind) {
+                    present.push_back({i, cur[i].tf});
+                } else {
+                    if (opt.conjunctive) presentAll = false;
+                }
+            }
+            
+            if (!opt.conjunctive || presentAll) {
+                uint32_t dlen = 0;
+                if (ds.len.size() > mind) dlen = ds.len[mind];
+                if (dlen == 0) {
+                    uint32_t sumtf=0; for (auto &pr: present) sumtf += pr.second;
+                    dlen = max(1u, seenLen[mind] += sumtf);
+                }
+                double s = 0.0;
+                for (size_t j=0;j<present.size();++j) {
+                    size_t i = present[j].first;
+                    uint32_t tf = present[j].second;
+                    s += bm25.score(fts[i], tf, dlen);
+                }
+                if (s != 0.0) accum[mind] += s;
+            }
+
+            for (size_t i=0;i<cur.size();++i) {
+                if (!cur[i].eof && cur[i].doc == mind) advance(i);
+                else if (opt.conjunctive && !presentAll) {
+                    while (!cur[i].eof && cur[i].doc < mind) {
+                        if (!advance(i)) break;
+                    }
                 }
             }
         }
-    }
 
-    // build top-k
-    vector<Hit> hits; hits.reserve(accum.size());
-    for (auto &kv : accum) hits.push_back({kv.first, kv.second});
-    partial_sort(hits.begin(), hits.begin()+min(hits.size(), CFG.topk), hits.end(),
-                 [](const Hit& a, const Hit& b){ return a.score > b.score; });
-    if (hits.size() > CFG.topk) hits.resize(CFG.topk);
-    return hits;
+        vector<Hit> hits; hits.reserve(accum.size());
+        for (auto &kv : accum) hits.push_back({kv.first, kv.second});
+        partial_sort(hits.begin(), hits.begin()+min(hits.size(), CFG.topk), hits.end(),
+                     [](const Hit& a, const Hit& b){ return a.score > b.score; });
+        if (hits.size() > CFG.topk) hits.resize(CFG.topk);
+        return hits;
+    } catch (const exception& e) {
+        cerr << "[ERROR] runQuery failed: " << e.what() << "\n";
+        throw;
+    }
 }
 
 // ------------------------------ CLI parsing --------------------------
@@ -588,7 +595,6 @@ int main(int argc, char** argv) {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
 
-    // parse args
     vector<string> terms;
     bool verbose = false;
     for (int i=1;i<argc;i++) {
@@ -619,7 +625,6 @@ int main(int argc, char** argv) {
             cerr << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
         }
 
-        // Load optional doc stats (N, avgdl, lengths)
         if (verbose) cerr << "📖 Loading document statistics...\n";
         DocStats ds = loadDocStatsOptional(pathJoin(CFG.index_dir, CFG.collection_tsv));
         if (verbose) {
@@ -627,7 +632,6 @@ int main(int argc, char** argv) {
             cerr << "   • Average doc length: " << ds.avgdl << "\n\n";
         }
 
-        // Open index
         if (verbose) cerr << "📂 Loading index metadata...\n";
         IndexReader ir(CFG);
         if (verbose) {
@@ -635,7 +639,6 @@ int main(int argc, char** argv) {
             cerr << "   • Terms in lexicon: " << ir.lexicon().size() << "\n\n";
         }
 
-        // Check which terms are in index
         if (verbose) {
             cerr << "🔎 Checking term frequencies:\n";
             for (const auto& t : terms) {
@@ -649,7 +652,6 @@ int main(int argc, char** argv) {
             cerr << "\n";
         }
 
-        // Query
         if (verbose) cerr << "🚀 Executing query...\n";
         QueryOptions opt;
         opt.conjunctive = CFG.conjunctive;
@@ -666,7 +668,6 @@ int main(int argc, char** argv) {
             cerr << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
         }
 
-        // Print results
         cout.setf(std::ios::fixed); cout<<setprecision(6);
         cout << "Mode: " << (opt.conjunctive ? "AND" : "OR") << "\n";
         cout << "Top " << hits.size() << " results for: ";

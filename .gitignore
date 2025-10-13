@@ -16,6 +16,9 @@ BuildIndex
 # Other temporary files
 *.tmp
 
+output_dir/
+temp_postings/
+
 
 
 
