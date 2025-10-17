@@ -322,8 +322,8 @@ static inline double tf_BM25(uint32_t tf, uint32_t dl, double avgdl) {
     return (tf * (k1 + 1.0)) / (denom > 0 ? denom : 1.0);
 }
 
-// ------------------------------ Iterator ------------------------------
-struct PostingsIter {
+// ------------------------------ Iterator with Block Skipping ------------------------------
+struct PostingsIter {  // Enhanced Block-by-Block Iterator with Block Skipping
     // term scope
     uint32_t blockStart = 0;
     uint32_t blockEnd   = 0;
@@ -374,6 +374,38 @@ struct PostingsIter {
         }
         return true;
     }
+
+    // Block skipping functionality
+    bool skipToDoc(uint32_t targetDocId) {
+        if (eof) return false;
+        
+        // Skip blocks that can't contain the target document
+        while (curBlock < blockEnd && rdr->lastDocId[curBlock] < targetDocId) {
+            ++curBlock;
+        }
+        
+        if (curBlock >= blockEnd) {
+            eof = true;
+            return false;
+        }
+        
+        // Load the block that might contain our target
+        rdr->loadBlock(curBlock, blk);
+        idxInBlock = 0;
+        
+        // If this block's first doc is still greater than target, we're done
+        if (!blk.docIDs.empty() && blk.docIDs[0] > targetDocId) {
+            eof = true;
+            return false;
+        }
+        
+        // Find the position within the block
+        while (idxInBlock < blk.docIDs.size() && blk.docIDs[idxInBlock] < targetDocId) {
+            ++idxInBlock;
+        }
+        
+        return idxInBlock < blk.docIDs.size();
+    }
 };
 
 // ------------------------------- Query -------------------------------
@@ -384,12 +416,13 @@ struct QueryEnv {
 };
 
 static void banner(const vector<string>& terms, const string& mode) {
-    cerr << "🔍 Query Processing Started\n";
+    cerr << "🔍 Query Processing Started (with Block Skipping)\n";
     cerr << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
     cerr << "📝 Query terms: '" << join(terms, " ") << "'\n";
     cerr << "⚙️  Mode: " << mode << "\n";
     cerr << "📊 Top-K: " << CFG.topk << "\n";
     cerr << "📁 Index dir: " << CFG.index_dir << "\n";
+    cerr << "🚀 Block Skipping: ENABLED\n";
     cerr << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
 }
 
@@ -425,7 +458,7 @@ static QueryEnv setup(const vector<string>& terms) {
     return env;
 }
 
-// Multi-term query processing with DAAT traversal
+// Multi-term query processing with DAAT traversal and block skipping
 struct TermIterator {
     string term;
     LexiconEntry entry;
@@ -457,14 +490,24 @@ struct TermIterator {
         advance();
     }
     
+    // NEW: Skip to a specific document using block skipping
+    bool skipToDoc(uint32_t targetDocId) {
+        if (iter.skipToDoc(targetDocId)) {
+            advance();
+            return valid;
+        }
+        valid = false;
+        return false;
+    }
+    
     bool has() const { return valid; }
     uint32_t doc() const { return currentDoc; }
     uint32_t tf() const { return currentTf; }
 };
 
-// Multi-term OR processing (disjunctive)
+// Enhanced multi-term OR processing with block skipping
 static void runMultiTerm_OR(const vector<string>& terms, QueryEnv& env) {
-    cerr << "🚀 Executing multi-term OR query...\n";
+    cerr << "🚀 Executing multi-term OR query with block skipping...\n";
     
     vector<TermIterator> iterators;
     uint32_t N = env.ds.N ? env.ds.N : 1u<<31;
@@ -493,7 +536,7 @@ static void runMultiTerm_OR(const vector<string>& terms, QueryEnv& env) {
     double avgdl = env.ds.avgdl > 0 ? env.ds.avgdl : 1.0;
     unordered_map<uint32_t, double> docScores; // docID -> total score
     
-    // DAAT traversal
+    // DAAT traversal with block skipping
     while (true) {
         uint32_t minDoc = UINT32_MAX;
         
@@ -505,6 +548,13 @@ static void runMultiTerm_OR(const vector<string>& terms, QueryEnv& env) {
         }
         
         if (minDoc == UINT32_MAX) break; // All iterators exhausted
+        
+        // NEW: Skip iterators that are behind minDoc using block skipping
+        for (auto& it : iterators) {
+            if (it.has() && it.doc() < minDoc) {
+                it.skipToDoc(minDoc);
+            }
+        }
         
         // Accumulate scores for current document
         double docScore = 0.0;
@@ -535,15 +585,15 @@ static void runMultiTerm_OR(const vector<string>& terms, QueryEnv& env) {
     }
     
     sort(top.begin(), top.end(), [](auto&a, auto&b){ return a.first > b.first; });
-    cout << "Top " << top.size() << " results for OR query:\n";
+    cout << "Top " << top.size() << " results for OR query (with block skipping):\n";
     for (size_t i=0;i<top.size();++i) {
         cout << setw(2) << (i+1) << ". doc=" << top[i].second << " score=" << fixed << setprecision(4) << top[i].first << "\n";
     }
 }
 
-// Multi-term AND processing (conjunctive)
+// Enhanced multi-term AND processing with block skipping
 static void runMultiTerm_AND(const vector<string>& terms, QueryEnv& env) {
-    cerr << "🚀 Executing multi-term AND query...\n";
+    cerr << "🚀 Executing multi-term AND query with block skipping...\n";
     
     vector<TermIterator> iterators;
     uint32_t N = env.ds.N ? env.ds.N : 1u<<31;
@@ -572,7 +622,7 @@ static void runMultiTerm_AND(const vector<string>& terms, QueryEnv& env) {
     
     double avgdl = env.ds.avgdl > 0 ? env.ds.avgdl : 1.0;
     
-    // DAAT traversal for AND - simpler approach
+    // DAAT traversal for AND with block skipping
     while (true) {
         // Find minimum doc ID among all iterators
         uint32_t minDoc = UINT32_MAX;
@@ -589,6 +639,13 @@ static void runMultiTerm_AND(const vector<string>& terms, QueryEnv& env) {
         }
         
         if (!allValid || minDoc == UINT32_MAX) break;
+        
+        // NEW: Skip iterators that are behind minDoc using block skipping
+        for (auto& it : iterators) {
+            if (it.has() && it.doc() < minDoc) {
+                it.skipToDoc(minDoc);
+            }
+        }
         
         // Check if all iterators have this document
         bool allHaveMinDoc = true;
@@ -632,7 +689,7 @@ static void runMultiTerm_AND(const vector<string>& terms, QueryEnv& env) {
     }
     
     sort(top.begin(), top.end(), [](auto&a, auto&b){ return a.first > b.first; });
-    cout << "Top " << top.size() << " results for AND query:\n";
+    cout << "Top " << top.size() << " results for AND query (with block skipping):\n";
     for (size_t i=0;i<top.size();++i) {
         cout << setw(2) << (i+1) << ". doc=" << top[i].second << " score=" << fixed << setprecision(4) << top[i].first << "\n";
     }
