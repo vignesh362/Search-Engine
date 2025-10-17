@@ -15,7 +15,7 @@ BuildIndex
 
 # Other temporary files
 *.tmp
-
+.vscode/
 
 
 
