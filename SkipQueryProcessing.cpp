@@ -591,9 +591,9 @@ static void runMultiTerm_OR(const vector<string>& terms, QueryEnv& env) {
     }
 }
 
-// OPTIMIZED multi-term AND processing with efficient early termination
+// Enhanced multi-term AND processing with block skipping
 static void runMultiTerm_AND(const vector<string>& terms, QueryEnv& env) {
-    cerr << "🚀 Executing OPTIMIZED multi-term AND query with early termination...\n";
+    cerr << "🚀 Executing multi-term AND query with block skipping...\n";
     
     vector<TermIterator> iterators;
     uint32_t N = env.ds.N ? env.ds.N : 1u<<31;
@@ -622,7 +622,7 @@ static void runMultiTerm_AND(const vector<string>& terms, QueryEnv& env) {
     
     double avgdl = env.ds.avgdl > 0 ? env.ds.avgdl : 1.0;
     
-    // OPTIMIZED DAAT traversal for AND with efficient early termination
+    // DAAT traversal for AND with block skipping
     while (true) {
         // Find minimum doc ID among all iterators
         uint32_t minDoc = UINT32_MAX;
@@ -631,7 +631,7 @@ static void runMultiTerm_AND(const vector<string>& terms, QueryEnv& env) {
         for (const auto& it : iterators) {
             if (!it.has()) {
                 allValid = false;
-                break;  // Early termination if ANY iterator exhausted
+                break;
             }
             if (it.doc() < minDoc) {
                 minDoc = it.doc();
@@ -640,17 +640,24 @@ static void runMultiTerm_AND(const vector<string>& terms, QueryEnv& env) {
         
         if (!allValid || minDoc == UINT32_MAX) break;
         
-        // OPTIMIZATION: Quick check if all iterators have this document BEFORE expensive operations
+        // NEW: Skip iterators that are behind minDoc using block skipping
+        for (auto& it : iterators) {
+            if (it.has() && it.doc() < minDoc) {
+                it.skipToDoc(minDoc);
+            }
+        }
+        
+        // Check if all iterators have this document
         bool allHaveMinDoc = true;
         for (const auto& it : iterators) {
-            if (it.doc() != minDoc) {
+            if (!it.has() || it.doc() != minDoc) {
                 allHaveMinDoc = false;
-                break;  // Early exit - no need to process this document
+                break;
             }
         }
         
         if (allHaveMinDoc) {
-            // This document contains ALL terms - calculate score efficiently
+            // This document contains ALL terms - calculate score
             double docScore = 0.0;
             uint32_t dl = (env.ds.len.size() > minDoc ? env.ds.len[minDoc] : 1u);
             
@@ -682,7 +689,7 @@ static void runMultiTerm_AND(const vector<string>& terms, QueryEnv& env) {
     }
     
     sort(top.begin(), top.end(), [](auto&a, auto&b){ return a.first > b.first; });
-    cout << "Top " << top.size() << " results for OPTIMIZED AND query:\n";
+    cout << "Top " << top.size() << " results for AND query (with block skipping):\n";
     for (size_t i=0;i<top.size();++i) {
         cout << setw(2) << (i+1) << ". doc=" << top[i].second << " score=" << fixed << setprecision(4) << top[i].first << "\n";
     }
