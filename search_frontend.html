@@ -467,6 +467,15 @@
                     <option value="100">100</option>
                 </select>
             </div>
+            <div style="margin-left:12px;">
+                <label for="retrievalType">Retrieval:</label>
+                <select id="retrievalType">
+                    <option value="bm25">BM25 (sparse)</option>
+                    <option value="dense">Dense (FAISS)</option>
+                    <option value="hybrid">Hybrid (BM25 + Dense)</option>
+                    <option value="compare">Compare (BM25 vs Dense)</option>
+                </select>
+            </div>
         </div>
     </div>
 
@@ -534,7 +543,7 @@
         });
 
         // Add initial log
-        addLog('System initialized. Ready to search 8.8M documents!', 'info');
+        addLog('System initialized. Ready to search 1M MS MARCO passages!', 'info');
 
         // Allow Enter key to search
         document.getElementById('searchInput').addEventListener('keypress', function(e) {
@@ -578,7 +587,8 @@
                     body: JSON.stringify({ 
                         query: query,
                         topk: topN,
-                        conjunctive: conjunctive
+                        conjunctive: conjunctive,
+                        mode: document.getElementById('retrievalType').value
                     })
                 });
 
@@ -628,13 +638,36 @@
             }
 
             const resultCount = data.results.length.toLocaleString();
-            statsDiv.innerHTML = `About ${resultCount} results (${duration} seconds)`;
+            // show timing breakdown if provided
+            let timingHtml = `(${duration} seconds total)`;
+            if (data.timings) {
+                const t = data.timings;
+                timingHtml = `Total: ${t.total_time ? t.total_time.toFixed(3) : duration}s`;
+                const parts = [];
+                if (t.bm25_time) parts.push(`BM25: ${t.bm25_time.toFixed(3)}s`);
+                if (t.dense_time) parts.push(`Dense: ${t.dense_time.toFixed(3)}s`);
+                if (t.snippet_time) parts.push(`Snippets: ${t.snippet_time.toFixed(3)}s`);
+                if (parts.length) timingHtml += ' — ' + parts.join(' | ');
+            }
+            statsDiv.innerHTML = `About ${resultCount} results — ${timingHtml}`;
 
             let html = '';
             data.results.forEach((result, index) => {
-                const snippetsHtml = result.snippets.map(s => 
-                    `<div class="result-snippet">${s}</div>`
-                ).join('');
+                const snippetsHtml = result.snippets.map(s => `<div class="result-snippet">${s}</div>`).join('');
+                // score may be numeric or object when compare/hybrid mode
+                let scoreHtml = '';
+                if (typeof result.score === 'object') {
+                    const s = result.score;
+                    if (s.combined !== undefined) {
+                        // Hybrid mode
+                        scoreHtml = `Combined: ${s.combined.toFixed(4)} | BM25: ${s.bm25.toFixed(4)} | Dense: ${s.dense.toFixed(4)}`;
+                    } else {
+                        // Compare mode
+                        scoreHtml = `BM25: ${s.bm25.toFixed(4)} | Dense: ${s.dense.toFixed(4)}`;
+                    }
+                } else {
+                    scoreHtml = `Score: ${Number(result.score).toFixed(4)}`;
+                }
 
                 html += `
                     <div class="result-item">
@@ -646,7 +679,7 @@
                             <a href="#doc-${result.docID}">Document ${result.docID}</a>
                         </div>
                         ${snippetsHtml}
-                        <div class="result-meta">BM25 Score: ${result.score.toFixed(4)}</div>
+                        <div class="result-meta">${scoreHtml}</div>
                     </div>
                 `;
             });
@@ -656,8 +689,9 @@
         }
 
         // Add some welcome logs
-        setTimeout(() => addLog('Index loaded: 3.7M unique terms', 'info'), 500);
-        setTimeout(() => addLog('Backend connection established', 'info'), 1000);
+        setTimeout(() => addLog('BM25 index loaded: 1M documents', 'info'), 500);
+        setTimeout(() => addLog('FAISS index loaded: 1M vectors (384-dim)', 'info'), 800);
+        setTimeout(() => addLog('Backend connection established', 'info'), 1200);
     </script>
 </body>
 </html>

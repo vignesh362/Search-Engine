@@ -1,0 +1,27 @@
+2025-11-05 22:59:58,554 - INFO - Starting FAISS HNSW index building process
+2025-11-05 22:59:58,554 - INFO - Output directory: /Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense
+2025-11-05 22:59:58,554 - INFO - Loading embeddings from /Users/vigneshshanmugasundaram/Code/github/Search-Engine/data/ms_marco/msmarco_passages_embeddings_subset.h5...
+2025-11-05 22:59:59,353 - INFO - Loaded 1000000 embeddings with dimension 384 in 0.80 seconds
+2025-11-05 22:59:59,354 - INFO - Sample IDs: ['350', '448', '466', '646', '887']
+2025-11-05 22:59:59,360 - INFO - Building HNSW index with M=8, ef_construction=100, ef_search=100
+2025-11-05 22:59:59,360 - INFO - Embedding dimension: 384
+2025-11-05 22:59:59,360 - INFO - Creating HNSW index...
+2025-11-05 22:59:59,361 - INFO - Set ef_construction to 100
+2025-11-05 22:59:59,361 - INFO - Set ef_search to 100
+2025-11-05 22:59:59,361 - INFO - Adding embeddings to index...
+2025-11-05 23:02:56,866 - INFO - Index built successfully with 1000000 vectors
+2025-11-05 23:02:56,866 - INFO - Index building took 177.51 seconds (adding took 177.50 seconds)
+2025-11-05 23:02:56,866 - INFO - Saving index to /Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/faiss_hnsw_index.bin
+2025-11-05 23:02:57,320 - INFO - Saving IDs to /Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/passage_ids.pkl
+2025-11-05 23:02:57,337 - INFO - Save completed - Index: 0.45s, IDs: 0.02s
+2025-11-05 23:02:57,337 - INFO - Testing search with first passage...
+2025-11-05 23:02:57,340 - INFO - Search results:
+2025-11-05 23:02:57,342 - INFO - 1. Passage ID: 350, Distance: 0.0000
+2025-11-05 23:02:57,342 - INFO - 2. Passage ID: 3129072, Distance: 0.2675
+2025-11-05 23:02:57,342 - INFO - 3. Passage ID: 3705879, Distance: 0.3482
+2025-11-05 23:02:57,342 - INFO - 4. Passage ID: 7949257, Distance: 0.4110
+2025-11-05 23:02:57,342 - INFO - 5. Passage ID: 5217538, Distance: 0.4151
+2025-11-05 23:02:57,342 - INFO - HNSW index built and saved successfully!
+2025-11-05 23:02:57,342 - INFO - Total process time: 178.79 seconds
+2025-11-05 23:02:57,342 - INFO - Index file: /Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/faiss_hnsw_index.bin
+2025-11-05 23:02:57,342 - INFO - IDs file: /Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/passage_ids.pkl
