@@ -16,6 +16,23 @@ BuildIndex
 # Other temporary files
 *.tmp
 
+# Data files and directories
+data/
+*.h5
+*.tsv
 
+# Python cache files
+__pycache__/
+*.py[cod]
 
+# Virtual environment
+search_engine_env/
+
+# Index files
+bm25/bm25_subset_index.pkl
+dense/faiss_hnsw_index.bin
+dense/faiss_ivf_index.bin
+
+# Run files
+runs/*.trec
 
