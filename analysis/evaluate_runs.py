@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,  # Changed from INFO to WARNING to suppress info messages
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ def load_run(run_file: str) -> Dict[str, List[Tuple[str, float]]]:
     logger.info(f"Found {total_queries:,} unique queries")
     
     with open(run_file, 'r', encoding='utf-8') as f:
-        with tqdm(total=total_queries, desc="Loading queries") as pbar:
+        with tqdm(total=total_queries, desc="Loading queries", disable=True) as pbar:  # Disabled progress bar
             for line in f:
                 try:
                     # TREC format: qid Q0 docid rank score runname
@@ -250,7 +250,7 @@ def print_header(system_name, qrels_name):
     print("═"*width)
 
 def main():
-    logger.info("Starting evaluation process...")
+    # logger.info("Starting evaluation process...")  # Commented out for clean output
     parser = argparse.ArgumentParser(description='Evaluate search runs')
     parser.add_argument('--bm25-dev', default=os.path.join(RUNS_DIR, 'bm25.dev.trec'),
                       help='Path to BM25 dev run file')
@@ -272,16 +272,16 @@ def main():
                       help='Path to Hybrid eval2 run file')
     args = parser.parse_args()
     
-    logger.info("Configuration:")
-    logger.info(f"BM25 dev: {args.bm25_dev}")
-    logger.info(f"BM25 eval1: {args.bm25_eval1}")
-    logger.info(f"BM25 eval2: {args.bm25_eval2}")
-    logger.info(f"Dense dev: {args.dense_dev}")
-    logger.info(f"Dense eval1: {args.dense_eval1}")
-    logger.info(f"Dense eval2: {args.dense_eval2}")
-    logger.info(f"Hybrid dev: {args.hybrid_dev}")
-    logger.info(f"Hybrid eval1: {args.hybrid_eval1}")
-    logger.info(f"Hybrid eval2: {args.hybrid_eval2}")
+    # logger.info("Configuration:")  # Commented out for clean output
+    # logger.info(f"BM25 dev: {args.bm25_dev}")
+    # logger.info(f"BM25 eval1: {args.bm25_eval1}")
+    # logger.info(f"BM25 eval2: {args.bm25_eval2}")
+    # logger.info(f"Dense dev: {args.dense_dev}")
+    # logger.info(f"Dense eval1: {args.dense_eval1}")
+    # logger.info(f"Dense eval2: {args.dense_eval2}")
+    # logger.info(f"Hybrid dev: {args.hybrid_dev}")
+    # logger.info(f"Hybrid eval1: {args.hybrid_eval1}")
+    # logger.info(f"Hybrid eval2: {args.hybrid_eval2}")
     
     # Define run files for each qrels set
     run_files = {
@@ -350,13 +350,23 @@ def main():
             print("\n┌────────────┬─────────┐")
             print("│   Metric   │  Value  │")
             print("├────────────┼─────────┤")
-            metrics = [
-                ('MRR@10', 'mrr@10'),
-                ('Recall@100', 'recall@100'),
-                ('NDCG@10', 'ndcg@10'),
-                ('NDCG@100', 'ndcg@100'),
-                ('MAP', 'map')
-            ]
+            
+            # Use MAP instead of NDCG for dev dataset
+            if qrels_name == 'dev':
+                metrics = [
+                    ('MRR@10', 'mrr@10'),
+                    ('MAP', 'map'),
+                    ('Recall@100', 'recall@100')
+                ]
+            else:
+                # Use NDCG for eval1 and eval2
+                metrics = [
+                    ('MRR@10', 'mrr@10'),
+                    ('Recall@100', 'recall@100'),
+                    ('NDCG@10', 'ndcg@10'),
+                    ('NDCG@100', 'ndcg@100')
+                ]
+            
             for display_name, metric_key in metrics:
                 if metric_key in results:
                     print(f"│ {display_name:<10} │ {results[metric_key]:7.4f} │")
