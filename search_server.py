@@ -10,6 +10,12 @@ import subprocess
 import re
 import os
 from urllib.parse import parse_qs
+import sys
+
+IS_WINDOWS = sys.platform == "win32"
+QUERY_PROC_EXEC = 'QueryProcessing.exe' if IS_WINDOWS else './QueryProcessing'
+SNIPPET_EXEC = 'SnippetExtractor.exe' if IS_WINDOWS else './SnippetExtractor'
+
 
 class SearchHandler(BaseHTTPRequestHandler):
     
@@ -64,19 +70,17 @@ class SearchHandler(BaseHTTPRequestHandler):
     def search(self, query, topk, conjunctive=False):
         """Execute search pipeline: QueryProcessing + SnippetExtractor"""
         
-        # Step 1: Run QueryProcessing to get ranked documents
         mode_str = "conjunctive (AND)" if conjunctive else "disjunctive (OR)"
         print(f"[Step 1] Running QueryProcessing in {mode_str} mode...")
         try:
-            # Split query into individual terms
             query_terms = query.strip().split()
             if not query_terms:
                 return []
             
             print(f"[Step 1] Query terms: {query_terms}")
             
-            # Use the fixed QueryProcessing with proper multi-term support
-            query_cmd = ['./QueryProcessing'] + query_terms + ['-k', str(topk)]
+            # --- MODIFICATION: Use the OS-aware executable name ---
+            query_cmd = [QUERY_PROC_EXEC] + query_terms + ['-k', str(topk)]
             if conjunctive:
                 query_cmd.append('-and')
             
@@ -85,7 +89,6 @@ class SearchHandler(BaseHTTPRequestHandler):
                 stderr=subprocess.STDOUT
             ).decode('utf-8', errors='ignore')
             
-            # Parse document IDs and scores from output
             doc_pattern = re.compile(r'doc=(\d+)\s+score=([\d.]+)')
             matches = doc_pattern.findall(query_output)
             
@@ -98,15 +101,14 @@ class SearchHandler(BaseHTTPRequestHandler):
             
             print(f"[Step 1] Found {len(doc_ids)} documents")
             
-            # Step 2: Generate snippets for these documents
             print(f"[Step 2] Generating snippets...")
             doc_ids_str = ','.join(map(str, doc_ids))
             
             snippet_cmd = [
-                './SnippetExtractor',
+                SNIPPET_EXEC,
                 '--store-dir', 'index_output',
                 '--docs', doc_ids_str,
-                '--query', query,  # Use the original query for highlighting
+                '--query', query,
                 '--windowsz', '50',
                 '--per', '2'
             ]
@@ -114,9 +116,8 @@ class SearchHandler(BaseHTTPRequestHandler):
             snippet_output = subprocess.check_output(
                 snippet_cmd,
                 stderr=subprocess.STDOUT
-            ).decode('utf-8', errors='ignore')  # Ignore invalid UTF-8 bytes
+            ).decode('utf-8', errors='ignore')
             
-            # Parse JSON output from SnippetExtractor
             results = []
             for line in snippet_output.strip().split('\n'):
                 if line.strip():
@@ -134,20 +135,19 @@ class SearchHandler(BaseHTTPRequestHandler):
             
             print(f"[Step 2] Generated snippets for {len(results)} documents")
             
-            # Sort by original score order
             results.sort(key=lambda x: scores.get(x['docID'], 0), reverse=True)
             
             return results
             
         except subprocess.CalledProcessError as e:
-            print(f"[Error] Command failed: {e.output}")
-            raise Exception(f"Search command failed: {e.output}")
+            error_output = e.output.decode('utf-8', errors='ignore') if e.output else "No output from command."
+            print(f"[Error] Command failed with output:\n---\n{error_output}\n---")
+            raise Exception(f"Search command failed.")
         except FileNotFoundError as e:
-            print(f"[Error] Command not found: {e}")
-            raise Exception("Search executables not found. Please compile QueryProcessing and SnippetExtractor.")
+            print(f"[Error] Command not found: {e}. Ensure executables are in the correct path and compiled for your OS.")
+            raise Exception("Search executables not found. Please compile them for your operating system.")
     
     def send_json_response(self, data, status=200):
-        """Send JSON response"""
         self.send_response(status)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -155,24 +155,23 @@ class SearchHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode('utf-8'))
     
     def log_message(self, format, *args):
-        """Override to customize logging"""
         print(f"[Server] {format % args}")
 
 
 def run_server(port=8080):
     """Start the search server"""
     
-    # Check if required files exist
     if not os.path.exists('search_frontend.html'):
         print("Error: search_frontend.html not found!")
         return
     
-    if not os.path.exists('QueryProcessing'):
-        print("Error: QueryProcessing executable not found!")
+    # --- MODIFICATION: Use OS-aware executable names for checks ---
+    if not os.path.exists(QUERY_PROC_EXEC):
+        print(f"Error: {QUERY_PROC_EXEC} executable not found!")
         return
     
-    if not os.path.exists('SnippetExtractor'):
-        print("Error: SnippetExtractor executable not found!")
+    if not os.path.exists(SNIPPET_EXEC):
+        print(f"Error: {SNIPPET_EXEC} executable not found!")
         return
     
     if not os.path.exists('index_output'):
@@ -201,4 +200,3 @@ def run_server(port=8080):
 
 if __name__ == '__main__':
     run_server(port=8080)
-
