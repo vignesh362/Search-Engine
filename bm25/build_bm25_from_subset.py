@@ -86,16 +86,43 @@ class BM25Index:
         
         return score
     
-    def search(self, query_terms, k=10):
-        """Search for documents matching query terms"""
-        logger.info(f"Searching for terms: {query_terms}")
+    def search(self, query_terms, k=10, conjunctive=False):
+        """Search for documents matching query terms
         
-        # Get all documents that contain at least one query term
-        candidate_docs = set()
-        for term in query_terms:
-            if term in self.postings:
-                for doc_id, _ in self.postings[term]:
-                    candidate_docs.add(doc_id)
+        Args:
+            query_terms: List of search terms
+            k: Number of top results to return
+            conjunctive: If True, require all terms (AND); if False, require any term (OR)
+        """
+        logger.info(f"Searching for terms: {query_terms} ({'AND' if conjunctive else 'OR'} mode)")
+        
+        if conjunctive:
+            # AND mode: Get documents that contain ALL query terms
+            if not query_terms:
+                return []
+            
+            # Start with documents containing the first term
+            candidate_docs = None
+            for term in query_terms:
+                if term in self.postings:
+                    term_docs = {doc_id for doc_id, _ in self.postings[term]}
+                    if candidate_docs is None:
+                        candidate_docs = term_docs
+                    else:
+                        candidate_docs = candidate_docs.intersection(term_docs)
+                else:
+                    # If any term is not in index, no documents can match all terms
+                    return []
+            
+            if candidate_docs is None:
+                candidate_docs = set()
+        else:
+            # OR mode: Get all documents that contain at least one query term
+            candidate_docs = set()
+            for term in query_terms:
+                if term in self.postings:
+                    for doc_id, _ in self.postings[term]:
+                        candidate_docs.add(doc_id)
         
         # Score all candidate documents
         scored_docs = []

@@ -1,0 +1,95 @@
+
+╔════════════════════════════════════════════════════════════════╗
+║          Search Engine Index Builder - Full Collection        ║
+╚════════════════════════════════════════════════════════════════╝
+
+[0;34m[2025-11-07 00:33:18] INFO:[0m Configuration:
+  • Source: collection.tsv
+  • Documents: ALL (entire collection)
+  • Block size: 128
+  • Temp directory: tmp_postings
+  • Index directory: index_output
+
+[0;34m[2025-11-07 00:33:18] INFO:[0m Checking for collection.tsv...
+[0;32m[2025-11-07 00:33:18] SUCCESS:[0m Found collection.tsv (  0B, ~1000000 documents)
+
+────────────────────────────────────────────────────────────────
+[0;34m[2025-11-07 00:33:18] INFO:[0m Step 1/5: Cleaning up previous builds...
+────────────────────────────────────────────────────────────────
+[0;34m[2025-11-07 00:33:18] INFO:[0m No previous builds to clean up
+
+────────────────────────────────────────────────────────────────
+[0;34m[2025-11-07 00:33:18] INFO:[0m Step 2/5: Compiling Parse.cpp...
+────────────────────────────────────────────────────────────────
+[0;32m[2025-11-07 00:33:18] SUCCESS:[0m Parse executable is up to date
+
+────────────────────────────────────────────────────────────────
+[0;34m[2025-11-07 00:33:18] INFO:[0m Step 3/5: Parsing collection and creating intermediate postings...
+────────────────────────────────────────────────────────────────
+[1;33m[2025-11-07 00:33:18] WARNING:[0m This may take several minutes for large collections...
+
+Wrote run #0 (1000000 records) → "tmp_postings/postings_000000.tmp"
+Processed documents: 1000000
+Intermediate runs written to: "tmp_postings"
+Doc map sidecar: "tmp_postings/docmap.tsv"
+[0;32m[2025-11-07 00:33:19] SUCCESS:[0m Parse completed in 1s
+  • Created 1 posting files
+  • Temp storage used:  35M
+
+────────────────────────────────────────────────────────────────
+[0;34m[2025-11-07 00:33:19] INFO:[0m Step 4/5: Compiling BuildIndex.cpp...
+────────────────────────────────────────────────────────────────
+[0;32m[2025-11-07 00:33:19] SUCCESS:[0m BuildIndex executable is up to date
+
+────────────────────────────────────────────────────────────────
+[0;34m[2025-11-07 00:33:19] INFO:[0m Step 5/5: Building final compressed index...
+────────────────────────────────────────────────────────────────
+[1;33m[2025-11-07 00:33:19] WARNING:[0m Merging and compressing 1 posting files...
+
+OK. Blocks: 1000000  Terms: 1000000  invlists.bin bytes written.
+[0;32m[2025-11-07 00:33:20] SUCCESS:[0m BuildIndex completed in 1s
+
+╔════════════════════════════════════════════════════════════════╗
+║                    BUILD COMPLETE ✓                            ║
+╚════════════════════════════════════════════════════════════════╝
+
+[0;32m[2025-11-07 00:33:20] SUCCESS:[0m Index successfully created in: index_output/
+
+📊 Index Statistics:
+────────────────────────────────────────────────────────────────
+  File Sizes:
+    index_output/docidsize.bin     3.8M
+    index_output/freqsize.bin     3.8M
+    index_output/invlists.bin     3.8M
+    index_output/lastdocid.bin     3.8M
+    index_output/lexicon.tsv      31M
+
+  • Unique terms (lexicon): 1000000
+  • Documents processed: 1000000
+  • Total index size:  46M
+du: invalid option -- b
+usage: du [-Aclnx] [-H | -L | -P] [-g | -h | -k | -m] [-a | -s | -d depth] [-B blocksize] [-I mask] [-t threshold] [file ...]
+du: invalid option -- b
+usage: du [-Aclnx] [-H | -L | -P] [-g | -h | -k | -m] [-a | -s | -d depth] [-B blocksize] [-I mask] [-t threshold] [file ...]
+
+Parse error: bad token
+    <stdin>:1
+
+  • Compression ratio: x
+
+⏱️  Build Time:
+────────────────────────────────────────────────────────────────
+  • Parse phase: 1s
+  • Build phase: 1s
+  • Total time: 0m 2s
+
+[0;32m[2025-11-07 00:33:20] SUCCESS:[0m Search index is ready! Use QueryProcessing to search.
+
+Example queries:
+  ./QueryProcessing test
+  ./QueryProcessing --and document search
+  ./QueryProcessing -k 20 information retrieval
+
+Clean up temporary posting files? (y/N): 
+[0;34m[2025-11-07 00:33:27] INFO:[0m Temporary files kept in tmp_postings
+

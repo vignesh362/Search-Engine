@@ -1,0 +1,143 @@
+2025-11-07 00:47:18,814 - INFO - 
+============================================================
+2025-11-07 00:47:18,814 - INFO - Generating bm25 run file
+2025-11-07 00:47:18,814 - INFO - ============================================================
+2025-11-07 00:47:18,814 - INFO - Loading queries from /Users/vigneshshanmugasundaram/Code/github/Search-Engine/data/ms_marco/queries.dev.tsv
+2025-11-07 00:47:18,855 - INFO - Loaded 101093 queries
+2025-11-07 00:47:18,859 - INFO - Found 1000/1000 queries in query file
+2025-11-07 00:47:27,774 - INFO - Processed 10/1000 queries
+2025-11-07 00:47:35,555 - INFO - Processed 20/1000 queries
+2025-11-07 00:47:42,723 - INFO - Processed 30/1000 queries
+2025-11-07 00:47:50,276 - INFO - Processed 40/1000 queries
+2025-11-07 00:47:57,963 - INFO - Processed 50/1000 queries
+2025-11-07 00:48:05,513 - INFO - Processed 60/1000 queries
+2025-11-07 00:48:12,360 - INFO - Processed 70/1000 queries
+2025-11-07 00:48:20,082 - INFO - Processed 80/1000 queries
+2025-11-07 00:48:28,308 - INFO - Processed 90/1000 queries
+2025-11-07 00:48:40,569 - INFO - Processed 100/1000 queries
+2025-11-07 00:48:49,003 - INFO - Processed 110/1000 queries
+2025-11-07 00:48:57,592 - INFO - Processed 120/1000 queries
+2025-11-07 00:49:05,775 - INFO - Processed 130/1000 queries
+2025-11-07 00:49:14,107 - INFO - Processed 140/1000 queries
+2025-11-07 00:49:22,944 - INFO - Processed 150/1000 queries
+2025-11-07 00:49:32,165 - INFO - Processed 160/1000 queries
+2025-11-07 00:49:41,001 - INFO - Processed 170/1000 queries
+2025-11-07 00:49:49,847 - INFO - Processed 180/1000 queries
+2025-11-07 00:49:58,303 - INFO - Processed 190/1000 queries
+2025-11-07 00:50:06,843 - INFO - Processed 200/1000 queries
+2025-11-07 00:50:18,548 - INFO - Processed 210/1000 queries
+2025-11-07 00:50:30,540 - INFO - Processed 220/1000 queries
+2025-11-07 00:50:43,995 - INFO - Processed 230/1000 queries
+2025-11-07 00:50:57,256 - INFO - Processed 240/1000 queries
+2025-11-07 00:51:09,919 - INFO - Processed 250/1000 queries
+2025-11-07 00:51:19,447 - INFO - Processed 260/1000 queries
+2025-11-07 00:51:28,531 - INFO - Processed 270/1000 queries
+2025-11-07 00:51:39,562 - INFO - Processed 280/1000 queries
+2025-11-07 00:51:47,463 - INFO - Processed 290/1000 queries
+2025-11-07 00:51:55,440 - INFO - Processed 300/1000 queries
+2025-11-07 00:52:03,657 - INFO - Processed 310/1000 queries
+2025-11-07 00:52:11,170 - INFO - Processed 320/1000 queries
+2025-11-07 00:52:20,918 - INFO - Processed 330/1000 queries
+2025-11-07 00:52:28,419 - INFO - Processed 340/1000 queries
+2025-11-07 00:52:36,632 - INFO - Processed 350/1000 queries
+2025-11-07 00:52:44,697 - INFO - Processed 360/1000 queries
+2025-11-07 00:52:52,152 - INFO - Processed 370/1000 queries
+2025-11-07 00:53:00,548 - INFO - Processed 380/1000 queries
+2025-11-07 00:53:08,891 - INFO - Processed 390/1000 queries
+2025-11-07 00:53:17,331 - INFO - Processed 400/1000 queries
+2025-11-07 00:53:25,663 - INFO - Processed 410/1000 queries
+2025-11-07 00:53:34,510 - INFO - Processed 420/1000 queries
+2025-11-07 00:53:44,617 - INFO - Processed 430/1000 queries
+2025-11-07 00:53:55,847 - INFO - Processed 440/1000 queries
+2025-11-07 00:54:05,160 - INFO - Processed 450/1000 queries
+2025-11-07 00:54:14,181 - INFO - Processed 460/1000 queries
+2025-11-07 00:54:23,149 - INFO - Processed 470/1000 queries
+2025-11-07 00:54:32,130 - INFO - Processed 480/1000 queries
+2025-11-07 00:54:41,100 - INFO - Processed 490/1000 queries
+2025-11-07 00:54:51,606 - INFO - Processed 500/1000 queries
+2025-11-07 00:55:04,443 - INFO - Processed 510/1000 queries
+2025-11-07 00:55:15,557 - INFO - Processed 520/1000 queries
+2025-11-07 00:55:27,652 - INFO - Processed 530/1000 queries
+2025-11-07 00:55:38,699 - INFO - Processed 540/1000 queries
+2025-11-07 00:55:48,879 - INFO - Processed 550/1000 queries
+2025-11-07 00:56:00,228 - INFO - Processed 560/1000 queries
+2025-11-07 00:56:10,516 - INFO - Processed 570/1000 queries
+2025-11-07 00:56:21,099 - INFO - Processed 580/1000 queries
+2025-11-07 00:56:33,604 - INFO - Processed 590/1000 queries
+2025-11-07 00:56:45,965 - INFO - Processed 600/1000 queries
+2025-11-07 00:56:56,861 - INFO - Processed 610/1000 queries
+2025-11-07 00:57:09,478 - INFO - Processed 620/1000 queries
+2025-11-07 00:57:22,343 - INFO - Processed 630/1000 queries
+2025-11-07 00:57:35,353 - INFO - Processed 640/1000 queries
+2025-11-07 00:57:47,623 - INFO - Processed 650/1000 queries
+2025-11-07 00:58:01,673 - INFO - Processed 660/1000 queries
+2025-11-07 00:58:15,906 - INFO - Processed 670/1000 queries
+2025-11-07 00:58:28,150 - INFO - Processed 680/1000 queries
+2025-11-07 00:58:38,842 - INFO - Processed 690/1000 queries
+2025-11-07 00:58:50,392 - INFO - Processed 700/1000 queries
+2025-11-07 00:59:02,247 - INFO - Processed 710/1000 queries
+2025-11-07 00:59:14,765 - INFO - Processed 720/1000 queries
+2025-11-07 00:59:24,583 - INFO - Processed 730/1000 queries
+2025-11-07 00:59:33,568 - INFO - Processed 740/1000 queries
+2025-11-07 00:59:41,534 - INFO - Processed 750/1000 queries
+2025-11-07 00:59:48,513 - INFO - Processed 760/1000 queries
+2025-11-07 00:59:55,126 - INFO - Processed 770/1000 queries
+2025-11-07 01:00:01,924 - INFO - Processed 780/1000 queries
+2025-11-07 01:00:08,310 - INFO - Processed 790/1000 queries
+2025-11-07 01:00:15,334 - INFO - Processed 800/1000 queries
+2025-11-07 01:00:22,381 - INFO - Processed 810/1000 queries
+2025-11-07 01:00:29,225 - INFO - Processed 820/1000 queries
+2025-11-07 01:00:35,608 - INFO - Processed 830/1000 queries
+2025-11-07 01:00:42,128 - INFO - Processed 840/1000 queries
+2025-11-07 01:00:48,210 - INFO - Processed 850/1000 queries
+2025-11-07 01:00:54,546 - INFO - Processed 860/1000 queries
+2025-11-07 01:01:00,626 - INFO - Processed 870/1000 queries
+2025-11-07 01:01:07,291 - INFO - Processed 880/1000 queries
+2025-11-07 01:01:13,661 - INFO - Processed 890/1000 queries
+2025-11-07 01:01:20,501 - INFO - Processed 900/1000 queries
+2025-11-07 01:01:26,740 - INFO - Processed 910/1000 queries
+2025-11-07 01:01:32,809 - INFO - Processed 920/1000 queries
+2025-11-07 01:01:39,063 - INFO - Processed 930/1000 queries
+2025-11-07 01:01:45,470 - INFO - Processed 940/1000 queries
+2025-11-07 01:01:51,937 - INFO - Processed 950/1000 queries
+2025-11-07 01:01:58,446 - INFO - Processed 960/1000 queries
+2025-11-07 01:02:04,905 - INFO - Processed 970/1000 queries
+2025-11-07 01:02:11,008 - INFO - Processed 980/1000 queries
+2025-11-07 01:02:17,416 - INFO - Processed 990/1000 queries
+2025-11-07 01:02:23,831 - INFO - Processed 1000/1000 queries
+2025-11-07 01:02:23,831 - INFO - Successfully generated: /Users/vigneshshanmugasundaram/Code/github/Search-Engine/runs/bm25.dev.trec
+2025-11-07 01:02:23,831 - INFO - Processed: 1000/1000 queries
+2025-11-07 01:02:23,831 - INFO - Failed: 0 queries
+2025-11-07 01:02:23,835 - INFO - 
+============================================================
+2025-11-07 01:02:23,835 - INFO - Generating bm25 run file
+2025-11-07 01:02:23,835 - INFO - ============================================================
+2025-11-07 01:02:23,835 - INFO - Loading queries from /Users/vigneshshanmugasundaram/Code/github/Search-Engine/data/ms_marco/queries.eval.tsv
+2025-11-07 01:02:23,865 - INFO - Loaded 101092 queries
+2025-11-07 01:02:23,870 - INFO - Found 43/43 queries in query file
+2025-11-07 01:02:30,266 - INFO - Processed 10/43 queries
+2025-11-07 01:02:36,649 - INFO - Processed 20/43 queries
+2025-11-07 01:02:43,413 - INFO - Processed 30/43 queries
+2025-11-07 01:02:49,920 - INFO - Processed 40/43 queries
+2025-11-07 01:02:51,985 - INFO - Successfully generated: /Users/vigneshshanmugasundaram/Code/github/Search-Engine/runs/bm25.eval1.trec
+2025-11-07 01:02:51,985 - INFO - Processed: 43/43 queries
+2025-11-07 01:02:51,985 - INFO - Failed: 0 queries
+2025-11-07 01:02:51,987 - INFO - 
+============================================================
+2025-11-07 01:02:51,987 - INFO - Generating bm25 run file
+2025-11-07 01:02:51,987 - INFO - ============================================================
+2025-11-07 01:02:51,987 - INFO - Loading queries from /Users/vigneshshanmugasundaram/Code/github/Search-Engine/data/ms_marco/queries.eval.tsv
+2025-11-07 01:02:52,017 - INFO - Loaded 101092 queries
+2025-11-07 01:02:52,022 - INFO - Found 54/54 queries in query file
+2025-11-07 01:02:58,078 - INFO - Processed 10/54 queries
+2025-11-07 01:03:04,289 - INFO - Processed 20/54 queries
+2025-11-07 01:03:10,729 - INFO - Processed 30/54 queries
+2025-11-07 01:03:17,022 - INFO - Processed 40/54 queries
+2025-11-07 01:03:23,393 - INFO - Processed 50/54 queries
+2025-11-07 01:03:26,131 - INFO - Successfully generated: /Users/vigneshshanmugasundaram/Code/github/Search-Engine/runs/bm25.eval2.trec
+2025-11-07 01:03:26,131 - INFO - Processed: 54/54 queries
+2025-11-07 01:03:26,131 - INFO - Failed: 0 queries
+2025-11-07 01:03:26,132 - INFO - 
+============================================================
+2025-11-07 01:03:26,132 - INFO - Summary: Generated 3/3 run files successfully
+2025-11-07 01:03:26,132 - INFO - ============================================================

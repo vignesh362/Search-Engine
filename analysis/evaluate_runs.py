@@ -60,9 +60,32 @@ def load_run(run_file: str) -> Dict[str, List[Tuple[str, float]]]:
     current_qid = None
     current_results = []
     
+    # Detect if scores are distances (lower is better) or similarities (higher is better)
+    score_order_reverse = None  # Will be determined from first query
+    
     def process_query_results(qid: str, results: List[Tuple[str, float]]) -> List[Tuple[str, float]]:
         """Process results for a single query, keeping only top 100 sorted by score"""
-        results.sort(key=lambda x: x[1], reverse=True)
+        nonlocal score_order_reverse
+        
+        # Auto-detect score ordering from first query
+        if score_order_reverse is None and len(results) > 1:
+            # Check if scores are generally increasing (distance-based) or decreasing (similarity-based)
+            # Sample a few points to be robust
+            sample_size = min(10, len(results))
+            increasing_count = 0
+            for i in range(sample_size - 1):
+                if results[i+1][1] > results[i][1]:
+                    increasing_count += 1
+            
+            # If most pairs are increasing, it's distance-based (lower is better)
+            if increasing_count > sample_size // 2:
+                score_order_reverse = False
+                logger.info("Detected distance-based scores (lower is better) - will sort ascending")
+            else:
+                score_order_reverse = True
+                logger.info("Detected similarity-based scores (higher is better) - will sort descending")
+        
+        results.sort(key=lambda x: x[1], reverse=score_order_reverse if score_order_reverse is not None else True)
         return results[:100]
     
     num_queries = 0
@@ -114,23 +137,24 @@ def load_run(run_file: str) -> Dict[str, List[Tuple[str, float]]]:
     logger.info(f"Processed {num_processed:,} results across {num_queries:,} queries")
     
     return run
-    
-    logger.info(f"Loaded {len(run)} queries with {num_entries} total results")
-    
-    # Final sort for any remaining queries
-    logger.info("Final sorting of results...")
-    for qid in tqdm(run.keys(), desc="Sorting"):
-        run[qid].sort(key=lambda x: x[1], reverse=True)
-        if len(run[qid]) > 100:  # Keep only top 100 results
-            run[qid] = run[qid][:100]
-    
-    return dict(run)
 
 def calculate_metrics(qrels: Dict[str, Dict[str, int]], 
                      run: Dict[str, List[Tuple[str, float]]], 
                      metrics_config: Dict[str, Any]) -> Dict[str, float]:
     """Calculate evaluation metrics for a run"""
     logger.info("Calculating evaluation metrics...")
+    
+    # Diagnostic logging
+    qrels_queries = set(qrels.keys())
+    run_queries = set(run.keys())
+    common_queries = qrels_queries & run_queries
+    
+    logger.info(f"Queries in qrels: {len(qrels_queries)}")
+    logger.info(f"Queries in run: {len(run_queries)}")
+    logger.info(f"Common queries (will be evaluated): {len(common_queries)}")
+    logger.info(f"Queries in qrels but not in run: {len(qrels_queries - run_queries)}")
+    logger.info(f"Queries in run but not in qrels: {len(run_queries - qrels_queries)}")
+    
     metric_values = defaultdict(list)
     total_queries = len(qrels)
     processed = 0
@@ -228,23 +252,55 @@ def print_header(system_name, qrels_name):
 def main():
     logger.info("Starting evaluation process...")
     parser = argparse.ArgumentParser(description='Evaluate search runs')
-    parser.add_argument('--bm25-run', default=os.path.join(RUNS_DIR, 'bm25.trec'),
-                      help='Path to BM25 run file')
-    parser.add_argument('--dense-run', default=os.path.join(RUNS_DIR, 'dense.trec'),
-                      help='Path to Dense run file')
+    parser.add_argument('--bm25-dev', default=os.path.join(RUNS_DIR, 'bm25.dev.trec'),
+                      help='Path to BM25 dev run file')
+    parser.add_argument('--bm25-eval1', default=os.path.join(RUNS_DIR, 'bm25.eval1.trec'),
+                      help='Path to BM25 eval1 run file')
+    parser.add_argument('--bm25-eval2', default=os.path.join(RUNS_DIR, 'bm25.eval2.trec'),
+                      help='Path to BM25 eval2 run file')
+    parser.add_argument('--dense-dev', default=os.path.join(RUNS_DIR, 'dense.dev.trec'),
+                      help='Path to Dense dev run file')
+    parser.add_argument('--dense-eval1', default=os.path.join(RUNS_DIR, 'dense.eval1.trec'),
+                      help='Path to Dense eval1 run file')
+    parser.add_argument('--dense-eval2', default=os.path.join(RUNS_DIR, 'dense.eval2.trec'),
+                      help='Path to Dense eval2 run file')
+    parser.add_argument('--hybrid-dev', default=os.path.join(RUNS_DIR, 'hybrid.dev.trec'),
+                      help='Path to Hybrid dev run file')
+    parser.add_argument('--hybrid-eval1', default=os.path.join(RUNS_DIR, 'hybrid.eval1.trec'),
+                      help='Path to Hybrid eval1 run file')
+    parser.add_argument('--hybrid-eval2', default=os.path.join(RUNS_DIR, 'hybrid.eval2.trec'),
+                      help='Path to Hybrid eval2 run file')
     args = parser.parse_args()
     
     logger.info("Configuration:")
-    logger.info(f"BM25 run file: {args.bm25_run}")
-    logger.info(f"Dense run file: {args.dense_run}")
+    logger.info(f"BM25 dev: {args.bm25_dev}")
+    logger.info(f"BM25 eval1: {args.bm25_eval1}")
+    logger.info(f"BM25 eval2: {args.bm25_eval2}")
+    logger.info(f"Dense dev: {args.dense_dev}")
+    logger.info(f"Dense eval1: {args.dense_eval1}")
+    logger.info(f"Dense eval2: {args.dense_eval2}")
+    logger.info(f"Hybrid dev: {args.hybrid_dev}")
+    logger.info(f"Hybrid eval1: {args.hybrid_eval1}")
+    logger.info(f"Hybrid eval2: {args.hybrid_eval2}")
     
-    # Load runs
-    try:
-        bm25_run = load_run(args.bm25_run)
-        dense_run = load_run(args.dense_run)
-    except FileNotFoundError as e:
-        logger.error(f"Run file not found: {e}")
-        sys.exit(1)
+    # Define run files for each qrels set
+    run_files = {
+        'dev': {
+            'BM25': args.bm25_dev,
+            'Dense': args.dense_dev,
+            'Hybrid': args.hybrid_dev
+        },
+        'eval1': {
+            'BM25': args.bm25_eval1,
+            'Dense': args.dense_eval1,
+            'Hybrid': args.hybrid_eval1
+        },
+        'eval2': {
+            'BM25': args.bm25_eval2,
+            'Dense': args.dense_eval2,
+            'Hybrid': args.hybrid_eval2
+        }
+    }
     
     # Define metrics configurations for different qrels sets
     metrics_configs = {
@@ -262,8 +318,9 @@ def main():
         }
     }
     
-    # Evaluate each run on each qrels set
-    for system_name, run in [("BM25", bm25_run), ("HNSW", dense_run)]:
+    # Evaluate each system on each qrels set
+    # Group by system: show all BM25 first, then all Dense, then all Hybrid
+    for system_name in ['BM25', 'Dense', 'Hybrid']:
         for qrels_name, qrels_path in [
             ('dev', QRELS['dev']),
             ('eval1', QRELS['eval1']),
@@ -274,7 +331,16 @@ def main():
             except FileNotFoundError:
                 logger.error(f"Qrels file not found: {qrels_path}")
                 continue
-                
+            
+            run_file = run_files[qrels_name][system_name]
+            
+            # Load the run file
+            try:
+                run = load_run(run_file)
+            except FileNotFoundError:
+                logger.error(f"Run file not found: {run_file}")
+                continue
+            
             print_header(system_name, qrels_path)
             
             # Calculate metrics

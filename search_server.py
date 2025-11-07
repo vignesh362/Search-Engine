@@ -10,9 +10,9 @@ import json
 import subprocess
 import re
 import os
+import sys
 import time
 import logging
-import sys
 import pickle
 import numpy as np
 import faiss
@@ -20,66 +20,101 @@ import h5py
 from urllib.parse import parse_qs
 from typing import List, Dict, Any, Tuple
 
+# Add bm25 directory to Python path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'bm25'))
+
 # Try to import requests for LM Studio API calls
 try:
     import requests
 except ImportError:
     requests = None
 
-# Import BM25Index class to fix pickle loading
-from bm25.build_bm25_from_subset import BM25Index
+# Import BM25Index class - try multiple approaches
+try:
+    from build_bm25_from_subset import BM25Index
+except ImportError:
+    try:
+        import build_bm25_from_subset
+        BM25Index = build_bm25_from_subset.BM25Index
+    except:
+        # Define a dummy class if import fails
+        class BM25Index:
+            pass
+        logger = logging.getLogger(__name__)
+        logger.warning("Could not import BM25Index, BM25 search may not work")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class ReuseAddrHTTPServer(HTTPServer):
+    """HTTPServer with SO_REUSEADDR to avoid 'Address already in use' errors"""
+    allow_reuse_address = True
+
+# Global variables for search systems (shared across all handler instances)
+_bm25_index = None
+_faiss_index = None
+_passage_ids = None
+_embeddings = None
+_systems_loaded = False
+
+class CustomUnpickler(pickle.Unpickler):
+    """Custom unpickler to handle BM25Index class from different modules"""
+    def find_class(self, module, name):
+        if name == 'BM25Index':
+            # Return the BM25Index class regardless of original module
+            try:
+                from build_bm25_from_subset import BM25Index
+                return BM25Index
+            except:
+                pass
+        return super().find_class(module, name)
+
+def load_search_systems():
+    """Load both BM25 and FAISS search systems once"""
+    global _bm25_index, _faiss_index, _passage_ids, _embeddings, _systems_loaded
+    
+    if _systems_loaded:
+        return
+    
+    try:
+        # Load BM25 index with custom unpickler
+        bm25_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/bm25/bm25_subset_index.pkl"
+        if os.path.exists(bm25_path):
+            logger.info("Loading BM25 index...")
+            with open(bm25_path, 'rb') as f:
+                _bm25_index = CustomUnpickler(f).load()
+            logger.info(f"BM25 index loaded: {_bm25_index.total_docs} documents")
+        else:
+            logger.warning("BM25 index not found, BM25 search will be disabled")
+        
+        # Load FAISS index
+        faiss_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/faiss_ivf_index.bin"
+        ids_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/passage_ids.pkl"
+        
+        if os.path.exists(faiss_path) and os.path.exists(ids_path):
+            logger.info("Loading FAISS index...")
+            _faiss_index = faiss.read_index(faiss_path)
+            with open(ids_path, 'rb') as f:
+                _passage_ids = pickle.load(f)
+            logger.info(f"FAISS index loaded: {_faiss_index.ntotal} vectors")
+        else:
+            logger.warning("FAISS index not found, dense search will be disabled")
+        
+        # Load embeddings for query encoding
+        embeddings_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/data/ms_marco/msmarco_passages_embeddings_subset.h5"
+        if os.path.exists(embeddings_path):
+            logger.info("Loading embeddings for query encoding...")
+            with h5py.File(embeddings_path, 'r') as f:
+                _embeddings = np.array(f['embedding']).astype(np.float32)
+            logger.info(f"Embeddings loaded: {_embeddings.shape}")
+        
+        _systems_loaded = True
+        
+    except Exception as e:
+        logger.error(f"Error loading search systems: {e}")
+
 class UnifiedSearchHandler(BaseHTTPRequestHandler):
-    
-    def __init__(self, *args, **kwargs):
-        # Initialize search systems
-        self.bm25_index = None
-        self.faiss_index = None
-        self.passage_ids = None
-        self.embeddings = None
-        self.load_search_systems()
-        super().__init__(*args, **kwargs)
-    
-    def load_search_systems(self):
-        """Load both BM25 and FAISS search systems"""
-        try:
-            # Load BM25 index
-            bm25_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/bm25/bm25_subset_index.pkl"
-            if os.path.exists(bm25_path):
-                logger.info("Loading BM25 index...")
-                with open(bm25_path, 'rb') as f:
-                    self.bm25_index = pickle.load(f)
-                logger.info(f"BM25 index loaded: {self.bm25_index.total_docs} documents")
-            else:
-                logger.warning("BM25 index not found, BM25 search will be disabled")
-            
-            # Load FAISS index
-            faiss_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/faiss_ivf_index.bin"
-            ids_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/passage_ids.pkl"
-            
-            if os.path.exists(faiss_path) and os.path.exists(ids_path):
-                logger.info("Loading FAISS index...")
-                self.faiss_index = faiss.read_index(faiss_path)
-                with open(ids_path, 'rb') as f:
-                    self.passage_ids = pickle.load(f)
-                logger.info(f"FAISS index loaded: {self.faiss_index.ntotal} vectors")
-            else:
-                logger.warning("FAISS index not found, dense search will be disabled")
-            
-            # Load embeddings for query encoding
-            embeddings_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/data/ms_marco/msmarco_passages_embeddings_subset.h5"
-            if os.path.exists(embeddings_path):
-                logger.info("Loading embeddings for query encoding...")
-                with h5py.File(embeddings_path, 'r') as f:
-                    self.embeddings = np.array(f['embedding']).astype(np.float32)
-                logger.info(f"Embeddings loaded: {self.embeddings.shape}")
-            
-        except Exception as e:
-            logger.error(f"Error loading search systems: {e}")
     
     def do_GET(self):
         """Serve the HTML frontend"""
@@ -136,14 +171,14 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
         tokens = re.findall(r'\b[a-zA-Z0-9]+\b', text.lower())
         return tokens
     
-    def bm25_search(self, query: str, k: int = 10) -> Tuple[List[Tuple[str, float]], float]:
+    def bm25_search(self, query: str, k: int = 10, conjunctive: bool = False) -> Tuple[List[Tuple[str, float]], float]:
         """Perform BM25 search using Python index"""
-        if self.bm25_index is None:
+        if _bm25_index is None:
             raise Exception("BM25 index not loaded")
         
         start_time = time.time()
         query_terms = self.clean_text(query)
-        results = self.bm25_index.search(query_terms, k)
+        results = _bm25_index.search(query_terms, k, conjunctive=conjunctive)
         search_time = time.time() - start_time
         
         return results, search_time
@@ -169,11 +204,15 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
             return doc_ids, scores, search_time
         except subprocess.CalledProcessError as e:
             logger.warning(f"C++ BM25 search failed: {e}, falling back to Python BM25")
-            return self.bm25_search(query, k)
+            # Convert Python BM25 results to C++ format
+            results, search_time = self.bm25_search(query, k, conjunctive)
+            doc_ids = [int(doc_id) for doc_id, _ in results]
+            scores = {int(doc_id): score for doc_id, score in results}
+            return doc_ids, scores, search_time
     
     def dense_search(self, query: str, k: int = 10) -> Tuple[List[Tuple[str, float]], float]:
         """Perform dense vector search using LM Studio embeddings"""
-        if self.faiss_index is None or self.passage_ids is None:
+        if _faiss_index is None or _passage_ids is None:
             raise Exception("FAISS index or passage IDs not loaded")
         
         start_time = time.time()
@@ -182,13 +221,13 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
         query_embedding = self.get_query_embedding(query)
         
         # Search FAISS index
-        distances, indices = self.faiss_index.search(query_embedding, k)
+        distances, indices = _faiss_index.search(query_embedding, k)
         
         # Convert results
         results = []
         for i, (idx, dist) in enumerate(zip(indices[0], distances[0])):
-            if idx < len(self.passage_ids):
-                passage_id = self.passage_ids[idx]
+            if idx < len(_passage_ids):
+                passage_id = _passage_ids[idx]
                 # Convert distance to similarity score
                 similarity = float(1.0 / (1.0 + dist))
                 results.append((passage_id, similarity))
@@ -199,7 +238,7 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
     def get_query_embedding(self, query: str) -> np.ndarray:
         """Get query embedding from LM Studio API"""
         embed_endpoint = "http://127.0.0.1:1234/v1/embeddings"
-        embed_model = "gaianet/text-embedding-all-minilm-l6-v2-embedding"
+        embed_model = "second-state/text-embedding-all-minilm-l6-v2-embedding"
         
         payload = {
             "model": embed_model,
@@ -248,10 +287,10 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
     
     def get_fallback_embedding(self, query: str) -> np.ndarray:
         """Fallback to hash-based embedding if LM Studio is unavailable"""
-        if self.embeddings is not None:
+        if _embeddings is not None:
             # Use query hash to select different embeddings for different queries
-            query_hash = hash(query) % len(self.embeddings)
-            query_embedding = self.embeddings[query_hash].reshape(1, -1)
+            query_hash = hash(query) % len(_embeddings)
+            query_embedding = _embeddings[query_hash].reshape(1, -1)
             
             # Add some noise based on query to make results more diverse
             np.random.seed(hash(query) % 2**32)  # Use query as seed for reproducibility
@@ -261,17 +300,28 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
         else:
             raise Exception("No embeddings available for query encoding")
     
-    def hybrid_search(self, query: str, k: int = 10, candidate_k: int = 1000) -> Tuple[List[Tuple[str, float, Dict]], float]:
-        """Perform hybrid search using BM25 as candidate generation and dense search as re-ranking"""
+    def hybrid_search(self, query: str, k: int = 10, conjunctive: bool = False, candidate_k: int = 1000) -> Tuple[List[Tuple[str, float, Dict]], float]:
+        """Perform hybrid search using BM25 as candidate generation and dense search as re-ranking
+        
+        Args:
+            query: Search query
+            k: Number of final results to return
+            conjunctive: Whether to use AND mode for BM25 candidate generation
+            candidate_k: Number of candidates to generate with BM25 before re-ranking
+        """
         start_time = time.time()
         
         # Step 1: Generate candidates using BM25
-        bm25_results, bm25_time = self.bm25_search(query, candidate_k)
+        bm25_results, bm25_time = self.bm25_search(query, candidate_k, conjunctive)
         candidate_doc_ids = [doc_id for doc_id, _ in bm25_results]
         bm25_scores = {doc_id: score for doc_id, score in bm25_results}
         
+        logger.info(f"Hybrid search: BM25 generated {len(candidate_doc_ids)} candidates")
+        
         # Step 2: Re-rank candidates using dense search
         reranked_results = self._rerank_candidates(query, candidate_doc_ids, k)
+        
+        logger.info(f"Hybrid search: Re-ranked to {len(reranked_results)} final results")
         
         # Step 3: Combine information for final results
         final_results = []
@@ -287,7 +337,7 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
     
     def _rerank_candidates(self, query: str, candidate_doc_ids: List[str], k: int) -> List[Tuple[str, float]]:
         """Re-rank candidate documents using dense vector similarity"""
-        if not candidate_doc_ids or self.faiss_index is None or self.passage_ids is None:
+        if not candidate_doc_ids or _embeddings is None or _passage_ids is None:
             return []
         
         # Get query embedding
@@ -295,18 +345,24 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
         if query_embedding.ndim == 1:
             query_embedding = query_embedding.reshape(1, -1)
         
+        # Create a mapping from doc_id to index for faster lookup
+        passage_id_to_index = {doc_id: idx for idx, doc_id in enumerate(_passage_ids)}
+        
         # Get embeddings for candidate documents
         candidate_embeddings = []
         valid_doc_ids = []
         
         for doc_id in candidate_doc_ids:
-            try:
-                doc_index = self.passage_ids.index(doc_id)
-                doc_embedding = self.faiss_index.reconstruct(doc_index)
-                candidate_embeddings.append(doc_embedding)
-                valid_doc_ids.append(doc_id)
-            except (ValueError, IndexError):
-                continue
+            if doc_id in passage_id_to_index:
+                doc_index = passage_id_to_index[doc_id]
+                try:
+                    # Use embeddings instead of reconstructing from FAISS
+                    doc_embedding = _embeddings[doc_index]
+                    candidate_embeddings.append(doc_embedding)
+                    valid_doc_ids.append(doc_id)
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Could not get embedding for doc {doc_id}: {e}")
+                    continue
         
         if not candidate_embeddings:
             return []
@@ -319,6 +375,12 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
         candidate_norms = candidate_embeddings / np.linalg.norm(candidate_embeddings, axis=1, keepdims=True)
         
         similarities = np.dot(candidate_norms, query_norm.T).flatten()
+        
+        # Sort by similarity and return top k
+        similarity_scores = list(zip(valid_doc_ids, similarities))
+        similarity_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        return similarity_scores[:k]
         
         # Sort by similarity and return top k
         similarity_scores = list(zip(valid_doc_ids, similarities))
@@ -361,8 +423,8 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
                         return snippets
             
             # Fallback to simple snippet generation using BM25 index
-            if self.bm25_index and doc_id in self.bm25_index.doc_texts:
-                text = self.bm25_index.doc_texts[doc_id]
+            if _bm25_index and doc_id in _bm25_index.doc_texts:
+                text = _bm25_index.doc_texts[doc_id]
                 # Simple snippet: find query terms and extract context
                 query_terms = query.lower().split()
                 text_lower = text.lower()
@@ -425,7 +487,7 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
                     
                 except Exception as e:
                     logger.warning(f"C++ BM25 failed: {e}, using Python BM25")
-                    results, search_time = self.bm25_search(query, topk)
+                    results, search_time = self.bm25_search(query, topk, conjunctive)
                     timings['bm25_time'] = search_time
                     
                     # Format results
@@ -453,7 +515,7 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
                     })
                 
             elif mode == 'hybrid':
-                results, search_time = self.hybrid_search(query, topk)
+                results, search_time = self.hybrid_search(query, topk, conjunctive)
                 timings['bm25_time'] = search_time  # Hybrid includes both
                 timings['dense_time'] = search_time
                 
@@ -469,7 +531,7 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
                 
             elif mode == 'compare':
                 # Run both BM25 and dense search separately for comparison
-                bm25_results, bm25_time = self.bm25_search(query, topk)
+                bm25_results, bm25_time = self.bm25_search(query, topk, conjunctive)
                 dense_results, dense_time = self.dense_search(query, topk)
                 
                 timings['bm25_time'] = bm25_time
@@ -478,27 +540,31 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
                 # Combine results for comparison
                 all_results = {}
                 for doc_id, score in bm25_results:
-                    all_results[doc_id] = {'bm25_score': score, 'dense_score': 0.0}
+                    all_results[doc_id] = {'bm25': score, 'dense': 0.0}
                 
                 for doc_id, score in dense_results:
                     if doc_id in all_results:
-                        all_results[doc_id]['dense_score'] = score
+                        all_results[doc_id]['dense'] = score
                     else:
-                        all_results[doc_id] = {'bm25_score': 0.0, 'dense_score': score}
+                        all_results[doc_id] = {'bm25': 0.0, 'dense': score}
                 
-                # Format results
+                # Format results - sort by combined score
                 formatted_results = []
                 for doc_id, scores in all_results.items():
                     snippets = self.generate_snippets(query, str(doc_id))
-                    # Calculate combined score for display
-                    combined_score = scores['bm25_score'] + scores['dense_score']
+                    # Calculate combined score for sorting
+                    combined_score = scores['bm25'] + scores['dense']
                     formatted_results.append({
                         'docID': str(doc_id),
-                        'score': float(combined_score),
-                        'bm25_score': float(scores['bm25_score']),
-                        'dense_score': float(scores['dense_score']),
+                        'score': {
+                            'bm25': float(scores['bm25']),
+                            'dense': float(scores['dense'])
+                        },
                         'snippets': snippets
                     })
+                
+                # Sort by combined score
+                formatted_results.sort(key=lambda x: x['score']['bm25'] + x['score']['dense'], reverse=True)
                 
             else:
                 raise Exception(f"Unknown search mode: {mode}")
@@ -522,6 +588,28 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
         """Override to customize logging"""
         logger.info(f"[Server] {format % args}")
 
+def kill_process_on_port(port):
+    """Kill any process using the specified port"""
+    try:
+        # Find process using the port
+        result = subprocess.run(
+            ['lsof', '-ti', f':{port}'],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.stdout.strip():
+            pids = result.stdout.strip().split('\n')
+            for pid in pids:
+                try:
+                    logger.info(f"Killing process {pid} on port {port}")
+                    subprocess.run(['kill', '-9', pid], check=True)
+                    time.sleep(0.5)  # Give it a moment to release the port
+                except subprocess.CalledProcessError:
+                    pass
+    except Exception as e:
+        logger.warning(f"Could not check/kill process on port {port}: {e}")
+
 def run_server(port=8080):
     """Start the unified search server"""
     
@@ -537,15 +625,30 @@ def run_server(port=8080):
             print(f"  - {f}")
         return
     
+    # Kill any existing process on the port
+    kill_process_on_port(port)
+    
+    # Load search systems before starting server
+    print("=" * 60)
+    print("🔍 UNIFIED SEARCH SERVER - INITIALIZING")
+    print("=" * 60)
+    load_search_systems()
+    print()
+    
     server_address = ('', port)
-    httpd = HTTPServer(server_address, UnifiedSearchHandler)
+    
+    # Use HTTPServer with socket reuse enabled
+    httpd = ReuseAddrHTTPServer(server_address, UnifiedSearchHandler)
     
     print("=" * 60)
-    print("🔍 UNIFIED SEARCH SERVER")
+    print("🔍 UNIFIED SEARCH SERVER - READY")
     print("=" * 60)
     print(f"✓ Server running on http://localhost:{port}")
     print(f"✓ BM25 + Dense Vector + Hybrid Search")
-    print(f"✓ C++ and Python implementations")
+    if _bm25_index:
+        print(f"✓ BM25 Index: {_bm25_index.total_docs:,} documents loaded")
+    if _faiss_index:
+        print(f"✓ FAISS Index: {_faiss_index.ntotal:,} vectors loaded")
     print(f"✓ Open your browser and navigate to: http://localhost:{port}")
     print(f"✓ Press Ctrl+C to stop the server")
     print("=" * 60)

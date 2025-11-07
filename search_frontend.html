@@ -159,6 +159,12 @@
             gap: 8px;
             font-size: 13px;
             color: #70757a;
+            transition: opacity 0.2s;
+        }
+
+        .search-mode.disabled {
+            opacity: 0.4;
+            pointer-events: none;
         }
 
         .mode-toggle {
@@ -443,7 +449,7 @@
                 <button class="clear-btn" id="clearBtn" onclick="clearSearch()">✕</button>
             </div>
             <button class="search-btn" onclick="performSearch()">Search</button>
-            <div class="search-mode">
+            <div class="search-mode" id="searchModeToggle">
                 <span>Mode:</span>
                 <div class="mode-toggle">
                     <label>
@@ -469,7 +475,7 @@
             </div>
             <div style="margin-left:12px;">
                 <label for="retrievalType">Retrieval:</label>
-                <select id="retrievalType">
+                <select id="retrievalType" onchange="updateModeToggle()">
                     <option value="bm25">BM25 (sparse)</option>
                     <option value="dense">Dense (FAISS)</option>
                     <option value="hybrid">Hybrid (BM25 + Dense)</option>
@@ -532,6 +538,29 @@
             document.getElementById('searchInput').focus();
         }
 
+        function updateModeToggle() {
+            const retrievalType = document.getElementById('retrievalType').value;
+            const searchModeToggle = document.getElementById('searchModeToggle');
+            
+            // Only show AND/OR toggle for BM25 mode
+            // Dense and Hybrid don't use term-based matching, so AND/OR doesn't apply
+            if (retrievalType === 'bm25') {
+                searchModeToggle.classList.remove('disabled');
+                searchModeToggle.style.visibility = 'visible';
+                addLog('AND/OR mode available for BM25 search', 'info');
+            } else {
+                searchModeToggle.classList.add('disabled');
+                searchModeToggle.style.visibility = 'hidden';
+                // Always use OR mode (false for conjunctive) for Dense and Hybrid
+                document.querySelector('input[name="searchMode"][value="or"]').checked = true;
+                if (retrievalType === 'dense') {
+                    addLog('Dense search uses semantic similarity (AND/OR not applicable)', 'info');
+                } else if (retrievalType === 'hybrid') {
+                    addLog('Hybrid search uses OR mode for candidate generation', 'info');
+                }
+            }
+        }
+
         // Show/hide clear button
         document.getElementById('searchInput').addEventListener('input', function(e) {
             const clearBtn = document.getElementById('clearBtn');
@@ -544,6 +573,9 @@
 
         // Add initial log
         addLog('System initialized. Ready to search 1M MS MARCO passages!', 'info');
+
+        // Initialize mode toggle visibility
+        updateModeToggle();
 
         // Allow Enter key to search
         document.getElementById('searchInput').addEventListener('keypress', function(e) {
