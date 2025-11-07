@@ -135,15 +135,26 @@ def calculate_metrics(qrels: Dict[str, Dict[str, int]],
     total_queries = len(qrels)
     processed = 0
     
+    # Keep track of statistics
+    queries_with_judgments = 0
+    queries_with_relevant = 0
+    queries_in_run = 0
+    
     for qid in qrels:
         if qid not in run:
+            logger.debug(f"Query {qid} not found in run")
             continue
-            
+        
+        queries_in_run += 1
         # Get relevant documents for this query
         relevant_docs = {pid for pid, rel in qrels[qid].items() if rel > 0}
+        queries_with_judgments += 1
+        
         if not relevant_docs:
+            logger.debug(f"Query {qid} has no relevant documents")
             continue
-            
+        
+        queries_with_relevant += 1
         retrieved_docs = [doc_id for doc_id, _ in run[qid]]
         
         # Calculate metrics for different cutoffs
@@ -191,9 +202,19 @@ def calculate_metrics(qrels: Dict[str, Dict[str, int]],
     # Average the metrics across all queries
     results = {}
     logger.info("Computing final metric averages...")
+    logger.info(f"Statistics:")
+    logger.info(f"- Total queries in qrels: {total_queries}")
+    logger.info(f"- Queries found in run: {queries_in_run}")
+    logger.info(f"- Queries with judgments: {queries_with_judgments}")
+    logger.info(f"- Queries with relevant docs: {queries_with_relevant}")
+    
     for metric, values in metric_values.items():
         if values:  # Only include metrics that have values
             results[metric] = sum(values) / len(values)
+            logger.info(f"- {metric}: {len(values)} values averaged")
+    
+    if not results:
+        logger.warning("No metrics could be calculated - check if runs contain relevant documents")
     
     return results
 
