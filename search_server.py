@@ -88,18 +88,40 @@ def load_search_systems():
         else:
             logger.warning("BM25 index not found, BM25 search will be disabled")
         
-        # Load FAISS index
-        faiss_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/faiss_ivf_index.bin"
+        # Load FAISS HNSW index (prefer HNSW over IVF for better quality)
+        hnsw_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/faiss_hnsw_index.bin"
+        ivf_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/faiss_ivf_index.bin"
         ids_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/dense/passage_ids.pkl"
         
+        # Prefer HNSW if available, fallback to IVF
+        faiss_path = hnsw_path if os.path.exists(hnsw_path) else ivf_path
+        
         if os.path.exists(faiss_path) and os.path.exists(ids_path):
-            logger.info("Loading FAISS index...")
+            logger.info(f"Loading FAISS index from {os.path.basename(faiss_path)}...")
             _faiss_index = faiss.read_index(faiss_path)
+            
+            # Configure FAISS index parameters for optimal search
+            if isinstance(_faiss_index, faiss.IndexHNSWFlat):
+                # Set HNSW search parameters for better recall
+                _faiss_index.hnsw.efSearch = 200  # Higher = better recall but slower
+                logger.info(f"FAISS HNSW index loaded: {_faiss_index.ntotal} vectors")
+                logger.info(f"  efSearch set to: {_faiss_index.hnsw.efSearch}")
+            elif hasattr(_faiss_index, 'nprobe'):
+                # Set IVF search parameters
+                _faiss_index.nprobe = 10  # Number of clusters to search
+                logger.info(f"FAISS IVF index loaded: {_faiss_index.ntotal} vectors")
+                logger.info(f"  nprobe set to: {_faiss_index.nprobe}")
+            else:
+                logger.info(f"FAISS index loaded: {_faiss_index.ntotal} vectors")
+            
+            # Load passage IDs
             with open(ids_path, 'rb') as f:
                 _passage_ids = pickle.load(f)
-            logger.info(f"FAISS index loaded: {_faiss_index.ntotal} vectors")
+            logger.info(f"Passage IDs loaded: {len(_passage_ids)} passages")
         else:
             logger.warning("FAISS index not found, dense search will be disabled")
+            logger.warning(f"  Checked: {hnsw_path}")
+            logger.warning(f"  Checked: {ivf_path}")
         
         # Load embeddings for query encoding
         embeddings_path = "/Users/vigneshshanmugasundaram/Code/github/Search-Engine/data/ms_marco/msmarco_passages_embeddings_subset.h5"
@@ -211,7 +233,7 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
             return doc_ids, scores, search_time
     
     def dense_search(self, query: str, k: int = 10) -> Tuple[List[Tuple[str, float]], float]:
-        """Perform dense vector search using LM Studio embeddings"""
+        """Perform dense vector search using FAISS HNSW/IVF index"""
         if _faiss_index is None or _passage_ids is None:
             raise Exception("FAISS index or passage IDs not loaded")
         
@@ -220,19 +242,40 @@ class UnifiedSearchHandler(BaseHTTPRequestHandler):
         # Get query embedding from LM Studio
         query_embedding = self.get_query_embedding(query)
         
+        # Ensure query embedding is float32 and 2D
+        if query_embedding.dtype != np.float32:
+            query_embedding = query_embedding.astype(np.float32)
+        if query_embedding.ndim == 1:
+            query_embedding = query_embedding.reshape(1, -1)
+        
         # Search FAISS index
         distances, indices = _faiss_index.search(query_embedding, k)
         
         # Convert results
         results = []
         for i, (idx, dist) in enumerate(zip(indices[0], distances[0])):
-            if idx < len(_passage_ids):
+            if idx >= 0 and idx < len(_passage_ids):
                 passage_id = _passage_ids[idx]
+                
+                # Handle bytes to string conversion
+                if isinstance(passage_id, bytes):
+                    passage_id = passage_id.decode('utf-8')
+                passage_id = str(passage_id)
+                
                 # Convert distance to similarity score
-                similarity = float(1.0 / (1.0 + dist))
+                # For L2 distance: smaller is better, convert to similarity
+                # For Inner Product: higher (more negative distance) is better
+                if isinstance(_faiss_index, faiss.IndexHNSWFlat):
+                    # HNSW uses L2 distance by default
+                    similarity = float(1.0 / (1.0 + dist))
+                else:
+                    # For inner product or other metrics
+                    similarity = float(-dist)  # Negative distance as score
+                
                 results.append((passage_id, similarity))
         
         search_time = time.time() - start_time
+        logger.debug(f"Dense search completed in {search_time:.3f}s, found {len(results)} results")
         return results, search_time
     
     def get_query_embedding(self, query: str) -> np.ndarray:
