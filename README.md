@@ -6,13 +6,6 @@ A comprehensive search engine implementation featuring **BM25 (lexical)**, **Den
 
 
 
-![Python](https://img.shields.io/badge/Python-3.8+-blue)![Search Engine](https://img.shields.io/badge/Language-C%2B%2B17-blue)
-
-![C++](https://img.shields.io/badge/C%2B%2B-17-green)![Python](https://img.shields.io/badge/Python-3.x-green)
-
-![License](https://img.shields.io/badge/License-MIT-yellow)![License](https://img.shields.io/badge/License-MIT-yellow)
-
-
 
 ---## 🌟 Features
 
@@ -1349,34 +1342,3 @@ Typical performance on modern hardware (SSD, 16GB RAM):
 | 10M docs       | ~45 min   | ~5 GB      | ~50 ms           |
 
 *Query times for top-10 with 2-3 term queries*
-
-## 🤝 Contributing
-
-Contributions are welcome! Areas for improvement:
-
-- [ ] Positional index for phrase queries
-- [ ] Query expansion and relevance feedback
-- [ ] Parallel index building
-- [ ] Distributed query processing
-- [ ] More sophisticated snippet ranking
-- [ ] Support for additional languages
-- [ ] Document metadata indexing
-
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- BM25 algorithm from Robertson & Zaragoza (2009)
-- VarByte compression technique from Williams & Zobel
-- Modern search engine architecture inspired by industry best practices
-
-## 📧 Contact
-
-For questions, issues, or suggestions, please open an issue on GitHub or contact the maintainers.
-
----
-
-**Happy Searching! 🔍✨**
-
