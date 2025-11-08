@@ -1,10 +1,9 @@
-"""TREC run file I/O and hybrid search utilities."""
+"""TREC run file I/O and cascading hybrid search utilities."""
 
 import logging
 from pathlib import Path
 from typing import Dict, List, Tuple
 import numpy as np
-from scipy import stats
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,70 +45,56 @@ def write_trec_run(path: str, runname: str, qid2ranked: Dict[int, List[Tuple[int
             for rank, (pid, score) in enumerate(results, 1):
                 f.write(f"{qid}\tQ0\t{pid}\t{rank}\t{score}\t{runname}\n")
 
-def normalize_scores(scores: np.ndarray, method: str = 'minmax') -> np.ndarray:
-    """Normalize scores using specified method."""
-    if len(scores) == 0:
-        return scores
-    
-    if method == 'minmax':
-        min_score = np.min(scores)
-        max_score = np.max(scores)
-        if max_score == min_score:
-            return np.zeros_like(scores)
-        return (scores - min_score) / (max_score - min_score)
-    
-    elif method == 'z':
-        mean = np.mean(scores)
-        std = np.std(scores)
-        if std == 0:
-            return np.zeros_like(scores)
-        return (scores - mean) / std
-    
-    else:
-        raise ValueError(f"Unknown normalization method: {method}")
-
-def normalize_and_merge(
+def rerank_with_dense(
     bm25_run: Dict[int, List[Tuple[int, float]]],
-    dense_run: Dict[int, List[Tuple[int, float]]],
-    alpha: float = 0.5,
+    query_ids: np.ndarray,
+    query_vecs: np.ndarray,
+    passage_ids: np.ndarray,
+    passage_vecs: np.ndarray,
     topk: int = 1000,
-    per_query_norm: str = 'minmax'
+    candidate_k: int = 1000
 ) -> Dict[int, List[Tuple[int, float]]]:
-    """Merge BM25 and dense runs with score normalization."""
+    """Cascading hybrid search: BM25 candidate generation + dense reranking."""
     logger.info(
-        f"Merging runs with alpha={alpha}, topk={topk}, "
-        f"norm={per_query_norm}"
+        f"Cascading hybrid search with candidate_k={candidate_k}, topk={topk}"
     )
     
-    merged: Dict[int, List[Tuple[int, float]]] = {}
+    # Create passage id -> index mapping
+    pid2idx = {pid: idx for idx, pid in enumerate(passage_ids)}
+    
+    reranked: Dict[int, List[Tuple[int, float]]] = {}
     
     # Process each query
-    for qid in set(bm25_run.keys()) | set(dense_run.keys()):
-        # Get passage scores from each run, defaulting to 0 for missing
-        bm25_scores = {pid: score for pid, score in bm25_run.get(qid, [])}
-        dense_scores = {pid: score for pid, score in dense_run.get(qid, [])}
+    for qix, qid in enumerate(query_ids):
+        if qid not in bm25_run:
+            continue
+            
+        # Get top-K passage IDs from BM25 (candidate generation)
+        candidate_pids = [pid for pid, _ in bm25_run[qid][:candidate_k]]
         
-        # Get union of all passage IDs
-        all_pids = set(bm25_scores.keys()) | set(dense_scores.keys())
+        # Get corresponding passage vectors
+        valid_pids = []
+        valid_vecs = []
+        for pid in candidate_pids:
+            if pid in pid2idx:
+                valid_pids.append(pid)
+                valid_vecs.append(passage_vecs[pid2idx[pid]])
+                
+        if not valid_pids:
+            continue
+            
+        # Convert to arrays
+        valid_vecs = np.array(valid_vecs)
         
-        # Convert to arrays with 0 for missing scores
-        pids = np.array(list(all_pids))
-        bm25_array = np.array([bm25_scores.get(pid, 0.0) for pid in pids])
-        dense_array = np.array([dense_scores.get(pid, 0.0) for pid in pids])
+        # Compute dot products with query (reranking with dense embeddings)
+        scores = np.dot(valid_vecs, query_vecs[qix])
         
-        # Normalize scores
-        bm25_norm = normalize_scores(bm25_array, per_query_norm)
-        dense_norm = normalize_scores(dense_array, per_query_norm)
-        
-        # Combine with weight alpha
-        final_scores = (1 - alpha) * bm25_norm + alpha * dense_norm
-        
-        # Sort by score and take top-k
-        top_k_idx = np.argsort(-final_scores)[:topk]
-        merged[qid] = [
-            (int(pids[i]), float(final_scores[i]))
-            for i in top_k_idx
+        # Sort by dense score and take top-k
+        sorted_idx = np.argsort(-scores)[:topk]
+        reranked[qid] = [
+            (valid_pids[i], float(scores[i]))
+            for i in sorted_idx
         ]
     
-    logger.info(f"Merged {len(merged)} queries")
-    return merged
+    logger.info(f"Reranked {len(reranked)} queries")
+    return reranked
